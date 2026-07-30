@@ -21,6 +21,8 @@ add_library(temper STATIC
     ${TEMPER_SRC_DIR}/core/logger.c
     ${TEMPER_SRC_DIR}/core/profiler.c
     ${TEMPER_SRC_DIR}/core/platform.c
+    ${TEMPER_SRC_DIR}/core/device.c
+    ${TEMPER_SRC_DIR}/core/resource.c
 
     ${TEMPER_SRC_DIR}/math/tensor.c
     ${TEMPER_SRC_DIR}/math/shape.c

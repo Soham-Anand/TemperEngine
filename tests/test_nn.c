@@ -42,7 +42,7 @@ static int test_failed = 0;
 TEST(test_dense_layer)
 {
     TemperLayer layer = temper_layer_dense(8, 4);
-    ASSERT(layer.weights.data != NULL);
+    ASSERT(temper_tensor_data(&layer.weights) != NULL);
     ASSERT(layer.weights.shape.dims[0] == 8);
     ASSERT(layer.weights.shape.dims[1] == 4);
     temper_layer_destroy(&layer);
@@ -51,7 +51,7 @@ TEST(test_dense_layer)
 TEST(test_layer_norm)
 {
     TemperLayerNorm ln = temper_layer_norm_create(16, 1e-5f);
-    ASSERT(ln.gamma.data != NULL);
+    ASSERT(temper_tensor_data(&ln.gamma) != NULL);
     ASSERT(ln.epsilon == 1e-5f);
     temper_layer_norm_destroy(&ln);
 }
@@ -59,16 +59,13 @@ TEST(test_layer_norm)
 TEST(test_layer_norm_forward)
 {
     TemperLayerNorm ln = temper_layer_norm_create(4, 1e-5f);
-    // Input: batch=1, features=4
     TemperShape s = temper_shape_2d(1, 4);
     TemperTensor input = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    input.data[0] = 1.0f;
-    input.data[1] = 2.0f;
-    input.data[2] = 3.0f;
-    input.data[3] = 4.0f;
+    float *idata = temper_tensor_data(&input);
+    idata[0] = 1.0f; idata[1] = 2.0f; idata[2] = 3.0f; idata[3] = 4.0f;
     TemperTensor out = temper_layer_norm_forward(&ln, &input);
-    // With gamma=1, beta=0: output should be normalized (mean~0, var~1)
-    float mean = (out.data[0] + out.data[1] + out.data[2] + out.data[3]) / 4.0f;
+    float *odata = temper_tensor_data(&out);
+    float mean = (odata[0] + odata[1] + odata[2] + odata[3]) / 4.0f;
     ASSERT(fabsf(mean) < 0.01f);
     temper_tensor_destroy(&input);
     temper_tensor_destroy(&out);
@@ -78,7 +75,7 @@ TEST(test_layer_norm_forward)
 TEST(test_embedding)
 {
     TemperEmbedding emb = temper_embedding_create(100, 32);
-    ASSERT(emb.table.data != NULL);
+    ASSERT(temper_tensor_data(&emb.table) != NULL);
     ASSERT(emb.vocab_size == 100);
     ASSERT(emb.embed_dim == 32);
     int64_t indices[] = {0, 1, 2};
@@ -93,15 +90,14 @@ TEST(test_relu)
 {
     TemperShape s = temper_shape_1d(4);
     TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    t.data[0] = -1.0f;
-    t.data[1] = 2.0f;
-    t.data[2] = -3.0f;
-    t.data[3] = 4.0f;
+    float *tdata = temper_tensor_data(&t);
+    tdata[0] = -1.0f; tdata[1] = 2.0f; tdata[2] = -3.0f; tdata[3] = 4.0f;
     TemperTensor r = temper_relu(&t);
-    ASSERT(r.data[0] == 0.0f);
-    ASSERT(r.data[1] == 2.0f);
-    ASSERT(r.data[2] == 0.0f);
-    ASSERT(r.data[3] == 4.0f);
+    float *rdata = temper_tensor_data(&r);
+    ASSERT(rdata[0] == 0.0f);
+    ASSERT(rdata[1] == 2.0f);
+    ASSERT(rdata[2] == 0.0f);
+    ASSERT(rdata[3] == 4.0f);
     temper_tensor_destroy(&t);
     temper_tensor_destroy(&r);
 }
@@ -110,9 +106,11 @@ TEST(test_gelu)
 {
     TemperShape s = temper_shape_1d(1);
     TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    t.data[0] = 0.0f;
+    float *tdata = temper_tensor_data(&t);
+    tdata[0] = 0.0f;
     TemperTensor r = temper_gelu(&t);
-    ASSERT(fabsf(r.data[0]) < 0.01f);
+    float *rdata = temper_tensor_data(&r);
+    ASSERT(fabsf(rdata[0]) < 0.01f);
     temper_tensor_destroy(&t);
     temper_tensor_destroy(&r);
 }
@@ -121,11 +119,11 @@ TEST(test_softmax)
 {
     TemperShape s = temper_shape_2d(1, 3);
     TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    t.data[0] = 1.0f;
-    t.data[1] = 2.0f;
-    t.data[2] = 3.0f;
+    float *tdata = temper_tensor_data(&t);
+    tdata[0] = 1.0f; tdata[1] = 2.0f; tdata[2] = 3.0f;
     TemperTensor r = temper_softmax(&t, 1);
-    float sum = r.data[0] + r.data[1] + r.data[2];
+    float *rdata = temper_tensor_data(&r);
+    float sum = rdata[0] + rdata[1] + rdata[2];
     ASSERT(fabsf(sum - 1.0f) < 1e-5f);
     temper_tensor_destroy(&t);
     temper_tensor_destroy(&r);
@@ -136,10 +134,10 @@ TEST(test_cross_entropy)
     TemperShape s = temper_shape_2d(1, 3);
     TemperTensor pred = temper_tensor_create(s, TEMPER_DTYPE_F32);
     TemperTensor target = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    pred.data[0] = 0.2f;
-    pred.data[1] = 0.3f;
-    pred.data[2] = 0.5f;
-    target.data[2] = 1.0f;
+    float *pdata = temper_tensor_data(&pred);
+    float *tdata = temper_tensor_data(&target);
+    pdata[0] = 0.2f; pdata[1] = 0.3f; pdata[2] = 0.5f;
+    tdata[2] = 1.0f;
     float loss = temper_cross_entropy(&pred, &target);
     ASSERT(loss > 0.0f);
     temper_tensor_destroy(&pred);
@@ -151,12 +149,11 @@ TEST(test_mse)
     TemperShape s = temper_shape_1d(2);
     TemperTensor pred = temper_tensor_create(s, TEMPER_DTYPE_F32);
     TemperTensor target = temper_tensor_create(s, TEMPER_DTYPE_F32);
-    pred.data[0] = 1.0f;
-    pred.data[1] = 2.0f;
-    target.data[0] = 1.5f;
-    target.data[1] = 2.5f;
+    float *pdata = temper_tensor_data(&pred);
+    float *tdata = temper_tensor_data(&target);
+    pdata[0] = 1.0f; pdata[1] = 2.0f;
+    tdata[0] = 1.5f; tdata[1] = 2.5f;
     float loss = temper_mse(&pred, &target);
-    // MSE = mean((0.5)^2 + (0.5)^2) = mean(0.25 + 0.25) = 0.25
     ASSERT(fabsf(loss - 0.25f) < 1e-6f);
     temper_tensor_destroy(&pred);
     temper_tensor_destroy(&target);

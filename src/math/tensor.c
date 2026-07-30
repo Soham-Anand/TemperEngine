@@ -20,10 +20,28 @@ static TemperShape broadcast_shape(const TemperShape *a, const TemperShape *b)
     return result;
 }
 
+float *temper_tensor_data(const TemperTensor *t)
+{
+    if (!t || !t->resource)
+    {
+        return NULL;
+    }
+    temper_resource_touch(t->resource);
+    return t->resource->host_ptr;
+}
+
+TemperDevice temper_tensor_device(const TemperTensor *t)
+{
+    if (!t || !t->resource)
+    {
+        return TEMPER_DEVICE_CPU_0;
+    }
+    return t->resource->device;
+}
+
 // Get element from tensor with broadcast indexing
 static float broadcast_get(const TemperTensor *t, const TemperShape *out_shape, size_t flat_idx)
 {
-    // Convert flat index to multi-dimensional index in output shape
     int64_t idx[TEMPER_MAX_DIMS];
     size_t remaining = flat_idx;
     for (int i = out_shape->ndim - 1; i >= 0; i--)
@@ -32,13 +50,11 @@ static float broadcast_get(const TemperTensor *t, const TemperShape *out_shape, 
         remaining /= out_shape->dims[i];
     }
 
-    // Map back to tensor's shape (broadcasting: dimension 1 repeats)
     size_t tensor_idx = 0;
     int offset = out_shape->ndim - t->shape.ndim;
     for (int i = 0; i < t->shape.ndim; i++)
     {
         int64_t dim_idx = (i + offset >= 0) ? idx[i + offset] : 0;
-        // If tensor dimension is 1, always use index 0 (broadcast)
         if (t->shape.dims[i] == 1)
         {
             dim_idx = 0;
@@ -46,7 +62,8 @@ static float broadcast_get(const TemperTensor *t, const TemperShape *out_shape, 
         tensor_idx = tensor_idx * (size_t)t->shape.dims[i] + (size_t)dim_idx;
     }
 
-    return t->data[tensor_idx];
+    float *data = temper_tensor_data(t);
+    return data ? data[tensor_idx] : 0.0f;
 }
 
 static void compute_strides(const TemperShape *shape, int64_t *strides)
@@ -81,47 +98,84 @@ size_t temper_dtype_size(TemperDType dtype)
     }
 }
 
-TemperTensor temper_tensor_create(TemperShape shape, TemperDType dtype)
+TemperTensor temper_tensor_create_on_device(TemperShape shape, TemperDType dtype, TemperDevice device)
 {
     TemperTensor t = {0};
     t.shape = shape;
     t.dtype = dtype;
     compute_strides(&shape, t.strides);
+    t.refcount = 1;
+
     size_t count = temper_shape_count(&shape);
-    t.data = (float *)calloc(count, sizeof(float));
-    TEMPER_ASSERT_MSG(t.data != NULL, "Tensor allocation failed");
-    t.owns_data = true;
+    size_t bytes = count * sizeof(float);
+    t.resource = temper_resource_create(device, bytes);
+    TEMPER_ASSERT_MSG(t.resource != NULL, "Resource allocation failed for tensor");
+
     return t;
+}
+
+TemperTensor temper_tensor_create(TemperShape shape, TemperDType dtype)
+{
+    return temper_tensor_create_on_device(shape, dtype, TEMPER_DEVICE_CPU_0);
 }
 
 TemperTensor temper_tensor_from_data(float *data, TemperShape shape, TemperDType dtype)
 {
-    TemperTensor t = {0};
-    t.shape = shape;
-    t.dtype = dtype;
-    compute_strides(&shape, t.strides);
-    t.data = data;
-    t.owns_data = false;
+    TemperTensor t = temper_tensor_create_on_device(shape, dtype, TEMPER_DEVICE_CPU_0);
+    size_t count = temper_shape_count(&shape);
+    float *dst = temper_tensor_data(&t);
+    if (dst && data)
+    {
+        memcpy(dst, data, count * sizeof(float));
+    }
     return t;
 }
 
 void temper_tensor_destroy(TemperTensor *t)
 {
-    if (t->owns_data && t->data)
+    if (t && t->resource)
     {
-        free(t->data);
-        t->data = NULL;
+        temper_resource_release(t->resource);
+        t->resource = NULL;
     }
+}
+
+TemperTensor temper_tensor_to(const TemperTensor *t, TemperDevice target_device)
+{
+    TEMPER_ASSERT(t != NULL);
+    if (temper_device_equal(temper_tensor_device(t), target_device))
+    {
+        // Retain and return a handle pointing to the same resource
+        TemperTensor copy = *t;
+        temper_resource_retain(copy.resource);
+        return copy;
+    }
+
+    TemperTensor new_t = temper_tensor_create_on_device(t->shape, t->dtype, target_device);
+    size_t count = temper_shape_count(&t->shape);
+    float *src = temper_tensor_data(t);
+    float *dst = temper_tensor_data(&new_t);
+    if (src && dst)
+    {
+        memcpy(dst, src, count * sizeof(float));
+    }
+    temper_resource_migrate(new_t.resource, target_device);
+    return new_t;
 }
 
 float temper_tensor_get(const TemperTensor *t, size_t idx)
 {
-    return t->data[idx];
+    float *data = temper_tensor_data(t);
+    return data ? data[idx] : 0.0f;
 }
 
 void temper_tensor_set(TemperTensor *t, size_t idx, float val)
 {
-    t->data[idx] = val;
+    float *data = temper_tensor_data(t);
+    if (data)
+    {
+        data[idx] = val;
+    }
 }
 
 size_t temper_tensor_index(const TemperTensor *t, int64_t *indices)
@@ -136,12 +190,17 @@ size_t temper_tensor_index(const TemperTensor *t, int64_t *indices)
 
 float temper_tensor_get_nd(const TemperTensor *t, int64_t *indices)
 {
-    return t->data[temper_tensor_index(t, indices)];
+    float *data = temper_tensor_data(t);
+    return data ? data[temper_tensor_index(t, indices)] : 0.0f;
 }
 
 void temper_tensor_set_nd(TemperTensor *t, int64_t *indices, float val)
 {
-    t->data[temper_tensor_index(t, indices)] = val;
+    float *data = temper_tensor_data(t);
+    if (data)
+    {
+        data[temper_tensor_index(t, indices)] = val;
+    }
 }
 
 size_t temper_tensor_bytes(const TemperTensor *t)
@@ -168,10 +227,11 @@ TemperTensor temper_tensor_add(const TemperTensor *a, const TemperTensor *b)
 {
     TemperShape out_shape = broadcast_shape(&a->shape, &b->shape);
     TemperTensor result = temper_tensor_create(out_shape, a->dtype);
+    float *res_data = temper_tensor_data(&result);
     size_t count = temper_shape_count(&out_shape);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = broadcast_get(a, &out_shape, i) + broadcast_get(b, &out_shape, i);
+        res_data[i] = broadcast_get(a, &out_shape, i) + broadcast_get(b, &out_shape, i);
     }
     return result;
 }
@@ -180,10 +240,11 @@ TemperTensor temper_tensor_sub(const TemperTensor *a, const TemperTensor *b)
 {
     TemperShape out_shape = broadcast_shape(&a->shape, &b->shape);
     TemperTensor result = temper_tensor_create(out_shape, a->dtype);
+    float *res_data = temper_tensor_data(&result);
     size_t count = temper_shape_count(&out_shape);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = broadcast_get(a, &out_shape, i) - broadcast_get(b, &out_shape, i);
+        res_data[i] = broadcast_get(a, &out_shape, i) - broadcast_get(b, &out_shape, i);
     }
     return result;
 }
@@ -192,10 +253,11 @@ TemperTensor temper_tensor_mul(const TemperTensor *a, const TemperTensor *b)
 {
     TemperShape out_shape = broadcast_shape(&a->shape, &b->shape);
     TemperTensor result = temper_tensor_create(out_shape, a->dtype);
+    float *res_data = temper_tensor_data(&result);
     size_t count = temper_shape_count(&out_shape);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = broadcast_get(a, &out_shape, i) * broadcast_get(b, &out_shape, i);
+        res_data[i] = broadcast_get(a, &out_shape, i) * broadcast_get(b, &out_shape, i);
     }
     return result;
 }
@@ -204,10 +266,11 @@ TemperTensor temper_tensor_div(const TemperTensor *a, const TemperTensor *b)
 {
     TemperShape out_shape = broadcast_shape(&a->shape, &b->shape);
     TemperTensor result = temper_tensor_create(out_shape, a->dtype);
+    float *res_data = temper_tensor_data(&result);
     size_t count = temper_shape_count(&out_shape);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = broadcast_get(a, &out_shape, i) / broadcast_get(b, &out_shape, i);
+        res_data[i] = broadcast_get(a, &out_shape, i) / broadcast_get(b, &out_shape, i);
     }
     return result;
 }
@@ -221,6 +284,11 @@ TemperTensor temper_tensor_matmul(const TemperTensor *a, const TemperTensor *b)
     int64_t n = b->shape.dims[1];
     TemperShape out_shape = temper_shape_2d(m, n);
     TemperTensor result = temper_tensor_create(out_shape, a->dtype);
+
+    float *a_data = temper_tensor_data(a);
+    float *b_data = temper_tensor_data(b);
+    float *res_data = temper_tensor_data(&result);
+
     for (int64_t i = 0; i < m; i++)
     {
         for (int64_t j = 0; j < n; j++)
@@ -228,9 +296,9 @@ TemperTensor temper_tensor_matmul(const TemperTensor *a, const TemperTensor *b)
             float sum = 0.0f;
             for (int64_t l = 0; l < k; l++)
             {
-                sum += a->data[i * k + l] * b->data[l * n + j];
+                sum += a_data[i * k + l] * b_data[l * n + j];
             }
-            result.data[i * n + j] = sum;
+            res_data[i * n + j] = sum;
         }
     }
     return result;
@@ -243,11 +311,15 @@ TemperTensor temper_tensor_transpose(const TemperTensor *t)
     int64_t cols = t->shape.dims[1];
     TemperShape out_shape = temper_shape_2d(cols, rows);
     TemperTensor result = temper_tensor_create(out_shape, t->dtype);
+
+    float *src_data = temper_tensor_data(t);
+    float *res_data = temper_tensor_data(&result);
+
     for (int64_t i = 0; i < rows; i++)
     {
         for (int64_t j = 0; j < cols; j++)
         {
-            result.data[j * rows + i] = t->data[i * cols + j];
+            res_data[j * rows + i] = src_data[i * cols + j];
         }
     }
     return result;
@@ -256,13 +328,13 @@ TemperTensor temper_tensor_transpose(const TemperTensor *t)
 TemperTensor temper_tensor_reshape(const TemperTensor *t, TemperShape new_shape)
 {
     TEMPER_ASSERT(temper_shape_count(&t->shape) == temper_shape_count(&new_shape));
-    TemperTensor result = temper_tensor_from_data(t->data, new_shape, t->dtype);
-    result.owns_data = false;
+    TemperTensor result = temper_tensor_from_data(temper_tensor_data(t), new_shape, t->dtype);
     return result;
 }
 
 TemperTensor temper_tensor_sum(const TemperTensor *t, int axis)
 {
+    float *t_data = temper_tensor_data(t);
     if (axis < 0)
     {
         TemperShape s = temper_shape_1d(1);
@@ -271,9 +343,10 @@ TemperTensor temper_tensor_sum(const TemperTensor *t, int axis)
         float sum = 0.0f;
         for (size_t i = 0; i < count; i++)
         {
-            sum += t->data[i];
+            sum += t_data[i];
         }
-        result.data[0] = sum;
+        float *res_data = temper_tensor_data(&result);
+        res_data[0] = sum;
         return result;
     }
 
@@ -298,6 +371,7 @@ TemperTensor temper_tensor_sum(const TemperTensor *t, int axis)
     }
 
     TemperTensor result = temper_tensor_create(out_shape, t->dtype);
+    float *res_data = temper_tensor_data(&result);
     size_t out_count = temper_shape_count(&out_shape);
     int64_t axis_size = t->shape.dims[axis];
 
@@ -306,7 +380,6 @@ TemperTensor temper_tensor_sum(const TemperTensor *t, int axis)
 
     for (size_t i = 0; i < out_count; i++)
     {
-        // Unravel flat out_idx 'i' to out_indices
         size_t remaining = i;
         for (int d = out_shape.ndim - 1; d >= 0; d--)
         {
@@ -331,7 +404,7 @@ TemperTensor temper_tensor_sum(const TemperTensor *t, int axis)
             }
             sum += temper_tensor_get_nd(t, full_indices);
         }
-        result.data[i] = sum;
+        res_data[i] = sum;
     }
     return result;
 }

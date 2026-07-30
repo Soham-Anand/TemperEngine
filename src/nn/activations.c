@@ -6,9 +6,11 @@ TemperTensor temper_relu(const TemperTensor *input)
 {
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
     size_t count = temper_shape_count(&input->shape);
+    float *in_data = temper_tensor_data(input);
+    float *res_data = temper_tensor_data(&result);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = input->data[i] > 0.0f ? input->data[i] : 0.0f;
+        res_data[i] = in_data[i] > 0.0f ? in_data[i] : 0.0f;
     }
     return result;
 }
@@ -22,9 +24,11 @@ TemperTensor temper_gelu(const TemperTensor *input)
 {
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
     size_t count = temper_shape_count(&input->shape);
+    float *in_data = temper_tensor_data(input);
+    float *res_data = temper_tensor_data(&result);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = gelu_approx(input->data[i]);
+        res_data[i] = gelu_approx(in_data[i]);
     }
     return result;
 }
@@ -38,9 +42,11 @@ TemperTensor temper_silu(const TemperTensor *input)
 {
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
     size_t count = temper_shape_count(&input->shape);
+    float *in_data = temper_tensor_data(input);
+    float *res_data = temper_tensor_data(&result);
     for (size_t i = 0; i < count; i++)
     {
-        result.data[i] = input->data[i] * sigmoid(input->data[i]);
+        res_data[i] = in_data[i] * sigmoid(in_data[i]);
     }
     return result;
 }
@@ -51,27 +57,31 @@ TemperTensor temper_softmax(const TemperTensor *input, int axis)
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
     int64_t rows = input->shape.dims[0];
     int64_t cols = input->shape.dims[1];
+
+    float *in_data = temper_tensor_data(input);
+    float *res_data = temper_tensor_data(&result);
+
     if (axis == 1 || axis == -1)
     {
         for (int64_t i = 0; i < rows; i++)
         {
-            float max_val = input->data[i * cols];
+            float max_val = in_data[i * cols];
             for (int64_t j = 1; j < cols; j++)
             {
-                if (input->data[i * cols + j] > max_val)
+                if (in_data[i * cols + j] > max_val)
                 {
-                    max_val = input->data[i * cols + j];
+                    max_val = in_data[i * cols + j];
                 }
             }
             float sum = 0.0f;
             for (int64_t j = 0; j < cols; j++)
             {
-                result.data[i * cols + j] = expf(input->data[i * cols + j] - max_val);
-                sum += result.data[i * cols + j];
+                res_data[i * cols + j] = expf(in_data[i * cols + j] - max_val);
+                sum += res_data[i * cols + j];
             }
             for (int64_t j = 0; j < cols; j++)
             {
-                result.data[i * cols + j] /= sum;
+                res_data[i * cols + j] /= sum;
             }
         }
     }

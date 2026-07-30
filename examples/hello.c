@@ -11,19 +11,21 @@ int main(void)
 
     TemperShape input_shape = temper_shape_2d(1, 8);
     TemperTensor input = temper_tensor_create(input_shape, TEMPER_DTYPE_F32);
+    float *idata = temper_tensor_data(&input);
     for (int i = 0; i < 8; i++)
     {
-        input.data[i] = (float)i;
+        idata[i] = (float)i;
     }
 
     TemperLayer dense = temper_layer_dense(8, 4);
     TemperTensor out = temper_layer_dense_forward(&dense, &input);
     TemperTensor activated = temper_relu(&out);
 
+    float *adata = temper_tensor_data(&activated);
     printf("Dense output: ");
     for (int i = 0; i < 4; i++)
     {
-        printf("%.4f ", activated.data[i]);
+        printf("%.4f ", adata[i]);
     }
     printf("\n");
 

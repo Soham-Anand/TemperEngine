@@ -35,6 +35,9 @@ void temper_optimizer_step(TemperOptimizer *opt, TemperTensor *params, const Tem
     size_t count = temper_shape_count(&params->shape);
     opt->step++;
 
+    float *p_data = temper_tensor_data(params);
+    float *g_data = temper_tensor_data(grads);
+
     if (opt->beta1 > 0.0f)
     {
         if (!opt->m)
@@ -44,23 +47,24 @@ void temper_optimizer_step(TemperOptimizer *opt, TemperTensor *params, const Tem
             opt->v = (TemperTensor *)malloc(sizeof(TemperTensor));
             *opt->v = temper_tensor_create(params->shape, params->dtype);
         }
+        float *m_data = temper_tensor_data(opt->m);
+        float *v_data = temper_tensor_data(opt->v);
         float bc1 = 1.0f - powf(opt->beta1, (float)opt->step);
         float bc2 = 1.0f - powf(opt->beta2, (float)opt->step);
         for (size_t i = 0; i < count; i++)
         {
-            opt->m->data[i] = opt->beta1 * opt->m->data[i] + (1.0f - opt->beta1) * grads->data[i];
-            opt->v->data[i] =
-                opt->beta2 * opt->v->data[i] + (1.0f - opt->beta2) * grads->data[i] * grads->data[i];
-            float m_hat = opt->m->data[i] / bc1;
-            float v_hat = opt->v->data[i] / bc2;
-            params->data[i] -= opt->learning_rate * m_hat / (sqrtf(v_hat) + opt->epsilon);
+            m_data[i] = opt->beta1 * m_data[i] + (1.0f - opt->beta1) * g_data[i];
+            v_data[i] = opt->beta2 * v_data[i] + (1.0f - opt->beta2) * g_data[i] * g_data[i];
+            float m_hat = m_data[i] / bc1;
+            float v_hat = v_data[i] / bc2;
+            p_data[i] -= opt->learning_rate * m_hat / (sqrtf(v_hat) + opt->epsilon);
         }
     }
     else
     {
         for (size_t i = 0; i < count; i++)
         {
-            params->data[i] -= opt->learning_rate * grads->data[i];
+            p_data[i] -= opt->learning_rate * g_data[i];
         }
     }
 }

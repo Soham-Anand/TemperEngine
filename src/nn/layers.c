@@ -17,9 +17,10 @@ TemperLayer temper_layer_dense(uint32_t in_features, uint32_t out_features)
     layer.grad_weights = temper_tensor_create(w_shape, TEMPER_DTYPE_F32);
     float scale = sqrtf(2.0f / (float)in_features);
     size_t count = temper_shape_count(&w_shape);
+    float *w_data = temper_tensor_data(&layer.weights);
     for (size_t i = 0; i < count; i++)
     {
-        layer.weights.data[i] = rand_float() * scale;
+        w_data[i] = rand_float() * scale;
     }
     TemperShape b_shape = temper_shape_1d(out_features);
     layer.bias = temper_tensor_create(b_shape, TEMPER_DTYPE_F32);
@@ -39,11 +40,14 @@ TemperTensor temper_layer_dense_forward(const TemperLayer *layer, const TemperTe
     // Add bias: output += bias (broadcast across batch dimension)
     int64_t batch = output.shape.dims[0];
     int64_t out_features = output.shape.dims[1];
+    float *out_data = temper_tensor_data(&output);
+    float *b_data = temper_tensor_data(&layer->bias);
+
     for (int64_t i = 0; i < batch; i++)
     {
         for (int64_t j = 0; j < out_features; j++)
         {
-            output.data[i * out_features + j] += layer->bias.data[j];
+            out_data[i * out_features + j] += b_data[j];
         }
     }
 
@@ -65,9 +69,10 @@ TemperLayerNorm temper_layer_norm_create(uint32_t normalized_shape, float epsilo
     ln.gamma = temper_tensor_create(s, TEMPER_DTYPE_F32);
     ln.beta = temper_tensor_create(s, TEMPER_DTYPE_F32);
     size_t count = temper_shape_count(&s);
+    float *g_data = temper_tensor_data(&ln.gamma);
     for (size_t i = 0; i < count; i++)
     {
-        ln.gamma.data[i] = 1.0f;
+        g_data[i] = 1.0f;
     }
     ln.epsilon = epsilon;
     return ln;
@@ -82,13 +87,18 @@ TemperTensor temper_layer_norm_forward(const TemperLayerNorm *ln, const TemperTe
 
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
 
+    float *in_data = temper_tensor_data(input);
+    float *res_data = temper_tensor_data(&result);
+    float *gamma_data = temper_tensor_data(&ln->gamma);
+    float *beta_data = temper_tensor_data(&ln->beta);
+
     for (int64_t i = 0; i < batch; i++)
     {
         // 1. Compute mean
         float mean = 0.0f;
         for (int64_t j = 0; j < normalized_shape; j++)
         {
-            mean += input->data[i * normalized_shape + j];
+            mean += in_data[i * normalized_shape + j];
         }
         mean /= (float)normalized_shape;
 
@@ -96,19 +106,18 @@ TemperTensor temper_layer_norm_forward(const TemperLayerNorm *ln, const TemperTe
         float variance = 0.0f;
         for (int64_t j = 0; j < normalized_shape; j++)
         {
-            float diff = input->data[i * normalized_shape + j] - mean;
+            float diff = in_data[i * normalized_shape + j] - mean;
             variance += diff * diff;
         }
         variance /= (float)normalized_shape;
 
-        // 3. Normalize: (x - mean) / sqrt(variance + epsilon)
+        // 3. Normalize & Affine: (x - mean) / sqrt(variance + epsilon) * gamma + beta
         float inv_std = 1.0f / sqrtf(variance + ln->epsilon);
         for (int64_t j = 0; j < normalized_shape; j++)
         {
-            float normalized = (input->data[i * normalized_shape + j] - mean) * inv_std;
-            // 4. Affine: gamma * normalized + beta
-            result.data[i * normalized_shape + j] =
-                ln->gamma.data[j] * normalized + ln->beta.data[j];
+            float normalized = (in_data[i * normalized_shape + j] - mean) * inv_std;
+            res_data[i * normalized_shape + j] =
+                gamma_data[j] * normalized + beta_data[j];
         }
     }
 
@@ -129,9 +138,10 @@ TemperEmbedding temper_embedding_create(uint32_t vocab_size, uint32_t embed_dim)
     TemperShape s = temper_shape_2d(vocab_size, embed_dim);
     emb.table = temper_tensor_create(s, TEMPER_DTYPE_F32);
     size_t count = temper_shape_count(&s);
+    float *t_data = temper_tensor_data(&emb.table);
     for (size_t i = 0; i < count; i++)
     {
-        emb.table.data[i] = rand_float() * 0.1f;
+        t_data[i] = rand_float() * 0.1f;
     }
     return emb;
 }
@@ -141,12 +151,16 @@ TemperTensor temper_embedding_forward(const TemperEmbedding *emb, const int64_t 
 {
     TemperShape s = temper_shape_2d(count, emb->embed_dim);
     TemperTensor result = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *res_data = temper_tensor_data(&result);
+    float *tbl_data = temper_tensor_data(&emb->table);
+
     for (uint32_t i = 0; i < count; i++)
     {
         int64_t idx = indices[i];
+        TEMPER_ASSERT_MSG(idx >= 0 && (uint32_t)idx < emb->vocab_size, "Embedding index out of bounds");
         for (uint32_t j = 0; j < emb->embed_dim; j++)
         {
-            result.data[i * emb->embed_dim + j] = emb->table.data[idx * emb->embed_dim + j];
+            res_data[i * emb->embed_dim + j] = tbl_data[idx * emb->embed_dim + j];
         }
     }
     return result;

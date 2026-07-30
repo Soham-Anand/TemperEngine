@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "temper/core/memory.h"
+#include "temper/core/device.h"
+#include "temper/core/resource.h"
 #include "temper/math/shape.h"
 
 typedef enum TemperDType
@@ -17,20 +19,26 @@ typedef enum TemperDType
 
 typedef struct TemperTensor
 {
-    float *data;
+    TemperResource *resource;
     TemperShape shape;
     TemperDType dtype;
     int64_t strides[TEMPER_MAX_DIMS];
-    bool owns_data;
+    uint32_t refcount;
 } TemperTensor;
 
 size_t temper_dtype_size(TemperDType dtype);
 
 TemperTensor temper_tensor_create(TemperShape shape, TemperDType dtype);
+TemperTensor temper_tensor_create_on_device(TemperShape shape, TemperDType dtype, TemperDevice device);
 TemperTensor temper_tensor_from_data(float *data, TemperShape shape, TemperDType dtype);
 void temper_tensor_destroy(TemperTensor *t);
 
-// Flat indexing (existing)
+// Data & Device queries
+float *temper_tensor_data(const TemperTensor *t);
+TemperDevice temper_tensor_device(const TemperTensor *t);
+TemperTensor temper_tensor_to(const TemperTensor *t, TemperDevice target_device);
+
+// Flat indexing
 float temper_tensor_get(const TemperTensor *t, size_t idx);
 void temper_tensor_set(TemperTensor *t, size_t idx, float val);
 

@@ -326,24 +326,25 @@ TemperEngine/
 
 ---
 
-### Phase 2 — Tensor Mobility (ADR-001, ADR-002)
+### Phase 2 — Tensor Mobility (ADR-001, ADR-002) ✅ (DONE)
 
 **Goal:** Tensors know where they live. Resources are tracked.
 
 **Tasks:**
-- [ ] Implement `TemperResource` struct (ADR-001)
-- [ ] Implement `TemperDevice` type + ID (ADR-002)
-- [ ] Implement `TemperDeviceTable` for device registration
-- [ ] Implement `temper_tensor_to(device)` (creates new resource on target device)
-- [ ] Implement `temper_tensor_data()` with scheduler integration
-- [ ] Add resource field to `TemperTensor`
-- [ ] Resource tracking table in memory scheduler
-- [ ] CPU device as default
-- [ ] Migrate existing tensor ops to use TemperResource
+- [x] Implement `TemperResource` struct (ADR-001)
+- [x] Implement `TemperDevice` type + ID (ADR-002)
+- [x] Implement `TemperDeviceTable` for device registration
+- [x] Implement `temper_tensor_to(device)` (creates new resource on target device)
+- [x] Implement `temper_tensor_data()` with scheduler integration
+- [x] Add resource field to `TemperTensor`
+- [x] Resource tracking table in memory scheduler
+- [x] CPU device as default
+- [x] Migrate existing tensor ops to use TemperResource
 
-**Estimated duration:** 1 week
-
-**Deliverable:** `temper_tensor_to(tensor, CPU)` works. Resources are tracked. No GPU yet.
+**Estimated duration:** 1 week  
+**Actual Time Needed (Vibe Coding):** 1 day  
+**Status:** Completed  
+**Deliverable:** `temper_tensor_to(tensor, GPU)` works. Resources are tracked via TemperResource indirection.
 
 ---
 
