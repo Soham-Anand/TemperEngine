@@ -1,6 +1,10 @@
 #include "temper/training/scheduler.h"
 #include <math.h>
 
+#ifndef M_PI
+    #define M_PI 3.14159265358979323846
+#endif
+
 TemperScheduler temper_scheduler_cosine(float initial_lr, float min_lr, uint32_t warmup_steps,
                                         uint32_t total_steps)
 {
