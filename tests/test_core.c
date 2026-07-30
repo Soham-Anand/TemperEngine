@@ -195,11 +195,7 @@ TEST(test_thread_pool_parallel_sum)
 static void slow_job(void *data)
 {
     (void)data;
-#ifdef _WIN32
-    Sleep(10);
-#else
-    usleep(10000); // 10ms
-#endif
+    temper_sleep_ms(10);
     atomic_fetch_add(&g_counter, 1);
 }
 

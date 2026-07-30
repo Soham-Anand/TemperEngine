@@ -1,8 +1,16 @@
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if !defined(_WIN32) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE
+#endif
+
 #include "temper/core/platform.h"
 
 #ifdef __APPLE__
     #include <mach/mach_time.h>
     #include <unistd.h>
+    #include <time.h>
     #define TEMPEN_PLATFORM_ID TEMPER_PLATFORM_MACOS
 #elif defined(_WIN32)
     #include <windows.h>
@@ -54,6 +62,9 @@ void temper_sleep_ms(uint32_t ms)
 #ifdef _WIN32
     Sleep(ms);
 #else
-    usleep((useconds_t)ms * 1000);
+    struct timespec req;
+    req.tv_sec = (time_t)(ms / 1000);
+    req.tv_nsec = (long)((ms % 1000) * 1000000L);
+    nanosleep(&req, NULL);
 #endif
 }

@@ -41,11 +41,19 @@ add_library(temper STATIC
 
 target_include_directories(temper PUBLIC ${TEMPER_INCLUDE_DIR})
 
-target_compile_options(temper PRIVATE
-    -Wall -Wextra -Wpedantic
-    $<$<CONFIG:Debug>:-g -O0 -DTEMPER_DEBUG>
-    $<$<CONFIG:Release>:-O2 -DNDEBUG>
-)
+if(MSVC)
+    target_compile_options(temper PRIVATE
+        /W4
+        $<$<CONFIG:Debug>:/Zi /Od -DTEMPER_DEBUG>
+        $<$<CONFIG:Release>:/O2 -DNDEBUG>
+    )
+else()
+    target_compile_options(temper PRIVATE
+        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Debug>:-g -O0 -DTEMPER_DEBUG>
+        $<$<CONFIG:Release>:-O2 -DNDEBUG>
+    )
+endif()
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(temper PRIVATE pthread m)
