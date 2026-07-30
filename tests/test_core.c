@@ -3,22 +3,36 @@
 #include "temper/core/logger.h"
 #include "temper/core/profiler.h"
 #include "temper/core/platform.h"
+#include "temper/core/threading.h"
 #include "temper/utils/assert.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 static int tests_run = 0;
 static int tests_passed = 0;
+static int test_failed = 0;
 
 #define TEST(name) static void name(void)
 #define RUN(name)                                                             \
     do                                                                        \
     {                                                                         \
         tests_run++;                                                          \
+        test_failed = 0;                                                      \
         printf("  %-40s", #name);                                             \
         name();                                                               \
-        tests_passed++;                                                       \
-        printf("PASS\n");                                                     \
+        if (test_failed)                                                      \
+            printf("FAIL\n");                                                 \
+        else                                                                  \
+        {                                                                     \
+            tests_passed++;                                                   \
+            printf("PASS\n");                                                 \
+        }                                                                     \
     } while (0)
 
 #define ASSERT(cond)                                                          \
@@ -26,7 +40,8 @@ static int tests_passed = 0;
     {                                                                         \
         if (!(cond))                                                          \
         {                                                                     \
-            printf("FAIL\n    %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
+            printf("\n    %s:%d: %s\n", __FILE__, __LINE__, #cond);           \
+            test_failed = 1;                                                  \
             return;                                                           \
         }                                                                     \
     } while (0)
@@ -125,6 +140,156 @@ TEST(test_platform)
     ASSERT(t > 0);
 }
 
+// --- Thread Pool Tests ---
+
+static _Atomic int g_counter = 0;
+
+static void increment_job(void *data)
+{
+    (void)data;
+    atomic_fetch_add(&g_counter, 1);
+}
+
+TEST(test_thread_pool_create_destroy)
+{
+    TemperThreadPool *pool = temper_thread_pool_create(4);
+    ASSERT(pool != NULL);
+    temper_thread_pool_destroy(pool);
+}
+
+TEST(test_thread_pool_submit_and_wait)
+{
+    TemperThreadPool *pool = temper_thread_pool_create(2);
+    ASSERT(pool != NULL);
+    atomic_store(&g_counter, 0);
+    for (int i = 0; i < 10; i++)
+    {
+        int ret = temper_thread_pool_submit(pool, increment_job, NULL);
+        ASSERT(ret == 0);
+    }
+    temper_thread_pool_wait(pool);
+    ASSERT(atomic_load(&g_counter) == 10);
+    temper_thread_pool_destroy(pool);
+}
+
+static void sum_job(void *data)
+{
+    int *val = (int *)data;
+    atomic_fetch_add(&g_counter, *val);
+}
+
+TEST(test_thread_pool_parallel_sum)
+{
+    TemperThreadPool *pool = temper_thread_pool_create(4);
+    atomic_store(&g_counter, 0);
+    int values[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    for (int i = 0; i < 8; i++)
+    {
+        temper_thread_pool_submit(pool, sum_job, &values[i]);
+    }
+    temper_thread_pool_wait(pool);
+    ASSERT(atomic_load(&g_counter) == 36);
+    temper_thread_pool_destroy(pool);
+}
+
+static void slow_job(void *data)
+{
+    (void)data;
+#ifdef _WIN32
+    Sleep(10);
+#else
+    usleep(10000); // 10ms
+#endif
+    atomic_fetch_add(&g_counter, 1);
+}
+
+TEST(test_thread_pool_queue_full)
+{
+    TemperThreadPool *pool = temper_thread_pool_create(1);
+    atomic_store(&g_counter, 0);
+    // Submit enough to fill queue (256 capacity) + overwhelm
+    int full = 0;
+    for (int i = 0; i < 300; i++)
+    {
+        int ret = temper_thread_pool_submit(pool, slow_job, NULL);
+        if (ret == -1)
+            full = 1;
+    }
+    temper_thread_pool_wait(pool);
+    ASSERT(full);
+    temper_thread_pool_destroy(pool);
+}
+
+// --- Memory Pool Stress Tests ---
+
+TEST(test_pool_stress_alloc_free_cycle)
+{
+    TemperPool pool = temper_pool_create(64, 128);
+    void *ptrs[128];
+    // Allocate all blocks
+    for (int i = 0; i < 128; i++)
+    {
+        ptrs[i] = temper_pool_alloc(&pool);
+        ASSERT(ptrs[i] != NULL);
+    }
+    // Pool should be empty
+    void *extra = temper_pool_alloc(&pool);
+    ASSERT(extra == NULL);
+    // Free all in reverse order
+    for (int i = 127; i >= 0; i--)
+    {
+        temper_pool_free(&pool, ptrs[i]);
+    }
+    // Allocate again - should work
+    for (int i = 0; i < 128; i++)
+    {
+        ptrs[i] = temper_pool_alloc(&pool);
+        ASSERT(ptrs[i] != NULL);
+    }
+    temper_pool_destroy(&pool);
+}
+
+TEST(test_pool_interleaved)
+{
+    TemperPool pool = temper_pool_create(32, 16);
+    void *a = temper_pool_alloc(&pool);
+    void *b = temper_pool_alloc(&pool);
+    temper_pool_free(&pool, a);
+    void *c = temper_pool_alloc(&pool);
+    ASSERT(c == a); // Should reuse freed block
+    temper_pool_free(&pool, b);
+    temper_pool_free(&pool, c);
+    temper_pool_destroy(&pool);
+}
+
+TEST(test_arena_stress)
+{
+    TemperArena arena = temper_arena_create(4096);
+    for (int i = 0; i < 100; i++)
+    {
+        void *p = temper_arena_alloc(&arena, 32);
+        ASSERT(p != NULL);
+    }
+    ASSERT(arena.offset > 0);
+    temper_arena_reset(&arena);
+    ASSERT(arena.offset == 0);
+    // Allocate again after reset
+    void *p = temper_arena_alloc(&arena, 64);
+    ASSERT(p != NULL);
+    temper_arena_destroy(&arena);
+}
+
+TEST(test_arena_alignment)
+{
+    TemperArena arena = temper_arena_create(1024);
+    void *p1 = temper_arena_alloc(&arena, 3);
+    void *p2 = temper_arena_alloc(&arena, 7);
+    // Check 8-byte alignment
+    ASSERT(((uintptr_t)p1 % 8) == 0);
+    ASSERT(((uintptr_t)p2 % 8) == 0);
+    temper_arena_destroy(&arena);
+}
+
 int main(void)
 {
     printf("=== Core Tests ===\n");
@@ -137,6 +302,14 @@ int main(void)
     RUN(test_logger);
     RUN(test_profiler);
     RUN(test_platform);
+    RUN(test_thread_pool_create_destroy);
+    RUN(test_thread_pool_submit_and_wait);
+    RUN(test_thread_pool_parallel_sum);
+    RUN(test_thread_pool_queue_full);
+    RUN(test_pool_stress_alloc_free_cycle);
+    RUN(test_pool_interleaved);
+    RUN(test_arena_stress);
+    RUN(test_arena_alignment);
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

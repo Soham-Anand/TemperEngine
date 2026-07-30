@@ -306,21 +306,20 @@ TemperEngine/
 
 ---
 
-### Phase 1 — Core Runtime Hardening
+### Phase 1 — Core Runtime Hardening ✅ (DONE)
 
 **Goal:** Production-quality foundation.
 
 **Tasks:**
-- [ ] Fix dense layer forward (add bias)
-- [ ] Implement layer norm forward properly (mean, variance, affine)
-- [ ] Add broadcasting to element-wise tensor ops
-- [ ] Add stride-aware tensor access
-- [ ] Thread pool unit tests
-- [ ] Memory pool stress tests
-- [ ] Cross-platform CI (GitHub Actions: macOS, Linux, Windows)
+- [x] Fix dense layer forward (add bias)
+- [x] Implement layer norm forward properly (mean, variance, affine)
+- [x] Add broadcasting to element-wise tensor ops
+- [x] Add stride-aware tensor access
+- [x] Thread pool unit tests
+- [x] Memory pool stress tests
+- [x] Cross-platform CI (GitHub Actions: macOS, Linux, Windows)
 
-**Estimated duration:** 2 weeks
-
+**Status:** Completed
 **Deliverable:** All existing code works correctly, broadcasting enabled, CI green.
 
 ---

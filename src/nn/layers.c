@@ -32,7 +32,22 @@ TemperTensor temper_layer_dense_forward(const TemperLayer *layer, const TemperTe
 {
     TEMPER_ASSERT(input->shape.ndim == 2);
     TEMPER_ASSERT(input->shape.dims[1] == layer->weights.shape.dims[0]);
-    return temper_tensor_matmul(input, &layer->weights);
+
+    // Matmul: output = input @ weights
+    TemperTensor output = temper_tensor_matmul(input, &layer->weights);
+
+    // Add bias: output += bias (broadcast across batch dimension)
+    int64_t batch = output.shape.dims[0];
+    int64_t out_features = output.shape.dims[1];
+    for (int64_t i = 0; i < batch; i++)
+    {
+        for (int64_t j = 0; j < out_features; j++)
+        {
+            output.data[i * out_features + j] += layer->bias.data[j];
+        }
+    }
+
+    return output;
 }
 
 void temper_layer_destroy(TemperLayer *layer)
@@ -60,13 +75,43 @@ TemperLayerNorm temper_layer_norm_create(uint32_t normalized_shape, float epsilo
 
 TemperTensor temper_layer_norm_forward(const TemperLayerNorm *ln, const TemperTensor *input)
 {
-    (void)ln;
+    TEMPER_ASSERT(input->shape.ndim == 2);
+
+    int64_t batch = input->shape.dims[0];
+    int64_t normalized_shape = input->shape.dims[1];
+
     TemperTensor result = temper_tensor_create(input->shape, input->dtype);
-    size_t count = temper_shape_count(&input->shape);
-    for (size_t i = 0; i < count; i++)
+
+    for (int64_t i = 0; i < batch; i++)
     {
-        result.data[i] = input->data[i];
+        // 1. Compute mean
+        float mean = 0.0f;
+        for (int64_t j = 0; j < normalized_shape; j++)
+        {
+            mean += input->data[i * normalized_shape + j];
+        }
+        mean /= (float)normalized_shape;
+
+        // 2. Compute variance
+        float variance = 0.0f;
+        for (int64_t j = 0; j < normalized_shape; j++)
+        {
+            float diff = input->data[i * normalized_shape + j] - mean;
+            variance += diff * diff;
+        }
+        variance /= (float)normalized_shape;
+
+        // 3. Normalize: (x - mean) / sqrt(variance + epsilon)
+        float inv_std = 1.0f / sqrtf(variance + ln->epsilon);
+        for (int64_t j = 0; j < normalized_shape; j++)
+        {
+            float normalized = (input->data[i * normalized_shape + j] - mean) * inv_std;
+            // 4. Affine: gamma * normalized + beta
+            result.data[i * normalized_shape + j] =
+                ln->gamma.data[j] * normalized + ln->beta.data[j];
+        }
     }
+
     return result;
 }
 

@@ -9,16 +9,23 @@
 
 static int tests_run = 0;
 static int tests_passed = 0;
+static int test_failed = 0;
 
 #define TEST(name) static void name(void)
 #define RUN(name)                                                             \
     do                                                                        \
     {                                                                         \
         tests_run++;                                                          \
+        test_failed = 0;                                                      \
         printf("  %-40s", #name);                                             \
         name();                                                               \
-        tests_passed++;                                                       \
-        printf("PASS\n");                                                     \
+        if (test_failed)                                                      \
+            printf("FAIL\n");                                                 \
+        else                                                                  \
+        {                                                                     \
+            tests_passed++;                                                   \
+            printf("PASS\n");                                                 \
+        }                                                                     \
     } while (0)
 
 #define ASSERT(cond)                                                          \
@@ -26,7 +33,8 @@ static int tests_passed = 0;
     {                                                                         \
         if (!(cond))                                                          \
         {                                                                     \
-            printf("FAIL\n    %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
+            printf("\n    %s:%d: %s\n", __FILE__, __LINE__, #cond);           \
+            test_failed = 1;                                                  \
             return;                                                           \
         }                                                                     \
     } while (0)
@@ -45,6 +53,25 @@ TEST(test_layer_norm)
     TemperLayerNorm ln = temper_layer_norm_create(16, 1e-5f);
     ASSERT(ln.gamma.data != NULL);
     ASSERT(ln.epsilon == 1e-5f);
+    temper_layer_norm_destroy(&ln);
+}
+
+TEST(test_layer_norm_forward)
+{
+    TemperLayerNorm ln = temper_layer_norm_create(4, 1e-5f);
+    // Input: batch=1, features=4
+    TemperShape s = temper_shape_2d(1, 4);
+    TemperTensor input = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    input.data[0] = 1.0f;
+    input.data[1] = 2.0f;
+    input.data[2] = 3.0f;
+    input.data[3] = 4.0f;
+    TemperTensor out = temper_layer_norm_forward(&ln, &input);
+    // With gamma=1, beta=0: output should be normalized (mean~0, var~1)
+    float mean = (out.data[0] + out.data[1] + out.data[2] + out.data[3]) / 4.0f;
+    ASSERT(fabsf(mean) < 0.01f);
+    temper_tensor_destroy(&input);
+    temper_tensor_destroy(&out);
     temper_layer_norm_destroy(&ln);
 }
 
@@ -129,7 +156,8 @@ TEST(test_mse)
     target.data[0] = 1.5f;
     target.data[1] = 2.5f;
     float loss = temper_mse(&pred, &target);
-    ASSERT(fabsf(loss - 0.125f) < 1e-6f);
+    // MSE = mean((0.5)^2 + (0.5)^2) = mean(0.25 + 0.25) = 0.25
+    ASSERT(fabsf(loss - 0.25f) < 1e-6f);
     temper_tensor_destroy(&pred);
     temper_tensor_destroy(&target);
 }
@@ -176,6 +204,7 @@ int main(void)
     printf("=== NN Tests ===\n");
     RUN(test_dense_layer);
     RUN(test_layer_norm);
+    RUN(test_layer_norm_forward);
     RUN(test_embedding);
     RUN(test_relu);
     RUN(test_gelu);

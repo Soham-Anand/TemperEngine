@@ -20,7 +20,7 @@ typedef struct TemperTensor
     float *data;
     TemperShape shape;
     TemperDType dtype;
-    size_t stride;
+    int64_t strides[TEMPER_MAX_DIMS];
     bool owns_data;
 } TemperTensor;
 
@@ -29,8 +29,19 @@ size_t temper_dtype_size(TemperDType dtype);
 TemperTensor temper_tensor_create(TemperShape shape, TemperDType dtype);
 TemperTensor temper_tensor_from_data(float *data, TemperShape shape, TemperDType dtype);
 void temper_tensor_destroy(TemperTensor *t);
+
+// Flat indexing (existing)
 float temper_tensor_get(const TemperTensor *t, size_t idx);
 void temper_tensor_set(TemperTensor *t, size_t idx, float val);
+
+// Multi-dimensional indexing with strides
+size_t temper_tensor_index(const TemperTensor *t, int64_t *indices);
+float temper_tensor_get_nd(const TemperTensor *t, int64_t *indices);
+void temper_tensor_set_nd(TemperTensor *t, int64_t *indices, float val);
+
+// Shape queries
+size_t temper_tensor_bytes(const TemperTensor *t);
+bool temper_tensor_is_contiguous(const TemperTensor *t);
 
 TemperTensor temper_tensor_add(const TemperTensor *a, const TemperTensor *b);
 TemperTensor temper_tensor_sub(const TemperTensor *a, const TemperTensor *b);
