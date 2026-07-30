@@ -189,14 +189,16 @@ TEST(test_cosine_scheduler)
 TEST(test_checkpoint)
 {
     TemperCheckpoint cp = {.epoch = 5, .step = 100, .loss = 0.5f};
-    int ret = temper_checkpoint_save("/tmp/test_temper.cp", &cp);
+    const char *path = "test_temper.cp";
+    int ret = temper_checkpoint_save(path, &cp);
     ASSERT(ret == 0);
     TemperCheckpoint loaded = {0};
-    ret = temper_checkpoint_load("/tmp/test_temper.cp", &loaded);
+    ret = temper_checkpoint_load(path, &loaded);
     ASSERT(ret == 0);
     ASSERT(loaded.epoch == 5);
     ASSERT(loaded.step == 100);
     ASSERT(fabsf(loaded.loss - 0.5f) < 1e-6f);
+    remove(path);
 }
 
 int main(void)
