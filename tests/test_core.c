@@ -7,10 +7,22 @@
 #include "temper/utils/assert.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdatomic.h>
-#ifdef _WIN32
-#include <windows.h>
+
+#ifdef _MSC_VER
+    #include <windows.h>
+    typedef volatile LONG temper_atomic_int;
+    #define temper_atomic_store(ptr, val) InterlockedExchange((ptr), (LONG)(val))
+    #define temper_atomic_load(ptr) InterlockedCompareExchange((ptr), 0, 0)
+    #define temper_atomic_fetch_add(ptr, val) InterlockedExchangeAdd((ptr), (LONG)(val))
 #else
+    #include <stdatomic.h>
+    typedef _Atomic int temper_atomic_int;
+    #define temper_atomic_store(ptr, val) atomic_store((ptr), (val))
+    #define temper_atomic_load(ptr) atomic_load((ptr))
+    #define temper_atomic_fetch_add(ptr, val) atomic_fetch_add((ptr), (val))
+#endif
+
+#ifndef _WIN32
 #include <unistd.h>
 #endif
 
@@ -142,12 +154,12 @@ TEST(test_platform)
 
 // --- Thread Pool Tests ---
 
-static _Atomic int g_counter = 0;
+static temper_atomic_int g_counter = 0;
 
 static void increment_job(void *data)
 {
     (void)data;
-    atomic_fetch_add(&g_counter, 1);
+    temper_atomic_fetch_add(&g_counter, 1);
 }
 
 TEST(test_thread_pool_create_destroy)
@@ -161,34 +173,34 @@ TEST(test_thread_pool_submit_and_wait)
 {
     TemperThreadPool *pool = temper_thread_pool_create(2);
     ASSERT(pool != NULL);
-    atomic_store(&g_counter, 0);
+    temper_atomic_store(&g_counter, 0);
     for (int i = 0; i < 10; i++)
     {
         int ret = temper_thread_pool_submit(pool, increment_job, NULL);
         ASSERT(ret == 0);
     }
     temper_thread_pool_wait(pool);
-    ASSERT(atomic_load(&g_counter) == 10);
+    ASSERT(temper_atomic_load(&g_counter) == 10);
     temper_thread_pool_destroy(pool);
 }
 
 static void sum_job(void *data)
 {
     int *val = (int *)data;
-    atomic_fetch_add(&g_counter, *val);
+    temper_atomic_fetch_add(&g_counter, *val);
 }
 
 TEST(test_thread_pool_parallel_sum)
 {
     TemperThreadPool *pool = temper_thread_pool_create(4);
-    atomic_store(&g_counter, 0);
+    temper_atomic_store(&g_counter, 0);
     int values[] = {1, 2, 3, 4, 5, 6, 7, 8};
     for (int i = 0; i < 8; i++)
     {
         temper_thread_pool_submit(pool, sum_job, &values[i]);
     }
     temper_thread_pool_wait(pool);
-    ASSERT(atomic_load(&g_counter) == 36);
+    ASSERT(temper_atomic_load(&g_counter) == 36);
     temper_thread_pool_destroy(pool);
 }
 
@@ -196,13 +208,13 @@ static void slow_job(void *data)
 {
     (void)data;
     temper_sleep_ms(10);
-    atomic_fetch_add(&g_counter, 1);
+    temper_atomic_fetch_add(&g_counter, 1);
 }
 
 TEST(test_thread_pool_queue_full)
 {
     TemperThreadPool *pool = temper_thread_pool_create(1);
-    atomic_store(&g_counter, 0);
+    temper_atomic_store(&g_counter, 0);
     // Submit enough to fill queue (256 capacity) + overwhelm
     int full = 0;
     for (int i = 0; i < 300; i++)
