@@ -1,6 +1,6 @@
 # ADR-006: Recomputation Policy
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-27
 **Deciders:** Soham Anand
 
@@ -237,3 +237,50 @@ void temper_scheduler_set_recompute_threshold(float threshold);  // default: 0.5
 void temper_tensor_pin(TemperTensor *t);
 void temper_tensor_unpin(TemperTensor *t);
 ```
+
+## Amendments (Phase 3 Implementation)
+
+The following amendments supersede the original ADR text where they conflict.
+
+### Amendment 1: Recomputable is a resource state, not a tier
+
+Consistent with ADR-004 Amendment 1. A recompute-evicted tensor is `resident == false` with no storage; it is **not** "in a tier". The original "Tier 4 (deleted)" language is replaced by the state transition:
+
+```
+resident=true  →  (recompute score > threshold)  →  resident=false, storage freed
+```
+
+The decision matrix becomes:
+
+| Score | Action |
+|-------|--------|
+| > 1.0 | Always recompute (drop storage) |
+| > 0.5 | Recompute if pressured (drop storage) |
+| > 0.0 | Recompute as last resort |
+| < 0.0 | Store (keep resident) |
+| pinned | Never evict |
+
+### Amendment 2: Deterministic access factor
+
+The original formula used a time-based access rate: `access_count / (lifetime + 1)`. Wall-clock terms make behavior timing-dependent and hard to test. Phase 3 uses an access-count factor instead:
+
+```
+score = (memory_saved / recompute_cost) × (1 / (1 + access_count))
+```
+
+`access_count = 0` → factor 1.0 (evict-and-recompute); each access halves the factor. This is deterministic and monotone.
+
+### Amendment 3: Recompute cost proxy
+
+`TemperGraphNode` does not yet carry a `recompute_flops` field. Until Phase 7 wires real FLOP costs, the scheduler uses `bytes` as the recompute-cost proxy, so `memory_saved / recompute_cost = 1.0` and the score reduces to the access factor. Phase 7 replaces the proxy with true per-op FLOP counts.
+
+### Amendment 4: Eviction integration
+
+Recompute-drop is one branch of the Phase 3 eviction ladder for a victim resource:
+
+1. `recomputable && score > threshold` → drop storage (`resident=false`)
+2. `can_compress(victim)` → demote CPU → COMPRESSED (real memory reclaimed)
+3. tier < SSD → accounting-only demote
+4. SSD → force-free (documented Phase 7 gap until paging exists)
+
+Promotion of a dropped resource (`temper_resource_promote`) logs and returns NULL until Phase 7 implements origin replay.

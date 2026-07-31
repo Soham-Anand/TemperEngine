@@ -38,6 +38,10 @@ float *temper_tensor_data(const TemperTensor *t);
 TemperDevice temper_tensor_device(const TemperTensor *t);
 TemperTensor temper_tensor_to(const TemperTensor *t, TemperDevice target_device);
 
+// Memory control (delegates to the memory scheduler)
+void temper_tensor_pin(TemperTensor *t);
+void temper_tensor_unpin(TemperTensor *t);
+
 // Flat indexing
 float temper_tensor_get(const TemperTensor *t, size_t idx);
 void temper_tensor_set(TemperTensor *t, size_t idx, float val);

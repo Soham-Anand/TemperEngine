@@ -1,4 +1,5 @@
 #include "temper/math/tensor.h"
+#include "temper/memory/scheduler.h"
 #include "temper/utils/assert.h"
 #include "temper/core/logger.h"
 #include <stdlib.h>
@@ -27,6 +28,15 @@ float *temper_tensor_data(const TemperTensor *t)
         return NULL;
     }
     temper_resource_touch(t->resource);
+    // Access integration: bring non-resident or compressed data back to CPU.
+    if (!(t->resource->flags & TEMPER_RESOURCE_RESIDENT) ||
+        (t->resource->flags & TEMPER_RESOURCE_COMPRESSED))
+    {
+        if (temper_resource_promote(t->resource) != 0)
+        {
+            return NULL;
+        }
+    }
     return t->resource->host_ptr;
 }
 
@@ -137,6 +147,22 @@ void temper_tensor_destroy(TemperTensor *t)
     {
         temper_resource_release(t->resource);
         t->resource = NULL;
+    }
+}
+
+void temper_tensor_pin(TemperTensor *t)
+{
+    if (t && t->resource)
+    {
+        temper_scheduler_pin(t->resource);
+    }
+}
+
+void temper_tensor_unpin(TemperTensor *t)
+{
+    if (t && t->resource)
+    {
+        temper_scheduler_unpin(t->resource);
     }
 }
 

@@ -216,7 +216,8 @@ TemperEngine/
 │       │   ├── scheduler.h
 │       │   └── checkpoint.h
 │       ├── memory/
-│       │   └── scheduler.h           (NEW — the brain)
+│       │   ├── scheduler.h           (NEW — the brain)
+│       │   └── compression.h         (NEW — pluggable compression backend)
 │       ├── backend/
 │       │   ├── cpu.h                 (NEW)
 │       │   └── metal.h               (NEW — C declarations)
@@ -246,7 +247,8 @@ TemperEngine/
 │   │   ├── checkpoint.c             (MODIFIED — save weights)
 │   │   └── scheduler.c
 │   ├── memory/
-│   │   └── scheduler.c              (NEW — the brain)
+│   │   ├── scheduler.c              (NEW — the brain)
+│   │   └── compression.c            (NEW — bf16 backend)
 │   └── backend/
 │       ├── cpu.c                    (NEW)
 │       ├── metal.m                  (NEW — Obj-C bridging)
@@ -354,21 +356,29 @@ TemperEngine/
 
 **Goal:** The brain of the engine.
 
+**Design (locked):** Policy / Mechanism / Backend three-layer separation. Tiers are four physical locations (GPU, CPU, Compressed, SSD); recomputable is a **resource state**, not a tier. Compression is a pluggable backend (`can_compress`/`compress`/`decompress`/`estimate_size`); Phase 3 ships bf16. Scheduler is deterministic (access-count factors, LRU tie-break on resource id), observable (`temper_scheduler_dump_state`), and invariant-checked (`temper_scheduler_validate`). See ADR-004/006 amendments.
+
 **Tasks:**
-- [ ] Implement `TemperMemScheduler` struct
-- [ ] Tiered memory model (GPU, CPU, Compressed, SSD, Recomputable)
-- [ ] Placement scoring function
-- [ ] Eviction algorithm (score-based)
-- [ ] Pressure tracking per tier
-- [ ] Pinned tensor support
-- [ ] Resource promotion/demotion
-- [ ] Integration with tensor creation/access
-- [ ] Memory scheduler unit tests
-- [ ] Statistics tracking (evictions, recomputations, compressions)
+- [ ] Implement `TemperMemScheduler` struct (opaque handle, `TEMPER_SCHEDULER_VERSION`)
+- [ ] Tiered memory model (GPU, CPU, Compressed, SSD) + recomputable-as-state flags
+- [ ] Placement scoring function (standalone policy, separate from dispatch)
+- [ ] Eviction algorithm (LRU order, pinned-skip, recompute-drop vs demote-to-compressed)
+- [ ] Pressure tracking per tier (`used` resident + `logical` bytes, `reserved` pinned)
+- [ ] Pinned tensor support (`temper_scheduler_pin/unpin`, `temper_tensor_pin/unpin`)
+- [ ] Resource promotion/demotion (decompress-on-access; recompute replay deferred to Phase 7)
+- [ ] Pluggable compression backend (bf16 shipped)
+- [ ] Integration with tensor creation/access (reserve-on-create, promote-on-access)
+- [ ] Scheduler invariants (`temper_scheduler_validate`) and observability (`dump_state`)
+- [ ] Memory scheduler unit tests (all end in `validate()`)
+- [ ] Statistics tracking (evictions, recomputations, compressions, decompressions, promotions, demotions)
+
+**Deferred to Phase 7:** recompute replay/cascade, gradient checkpointing, SSD paging, advanced compression (int8/int4/fp8). **Deferred to Phase 12:** per-device schedulers, async/batch scheduling, decision caching, telemetry/self-tuning. **Deferred to Phase 5:** placement-into-dispatch.
 
 **Estimated duration:** 2-3 weeks
 
 **Deliverable:** Scheduler manages all tensor memory. Eviction works. Pressure tracking works.
+
+**Post-Phase 3 (required before Phase 4):** profile and answer — how many evictions occur? how often are tensors compressed? is LRU selecting good victims? what is the scheduler's runtime overhead? how much memory is actually saved? Refine heuristics from measurements, then continue.
 
 ---
 

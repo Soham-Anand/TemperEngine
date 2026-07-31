@@ -39,6 +39,9 @@ add_library(temper STATIC
     ${TEMPER_SRC_DIR}/training/optimizer.c
     ${TEMPER_SRC_DIR}/training/checkpoint.c
     ${TEMPER_SRC_DIR}/training/scheduler.c
+
+    ${TEMPER_SRC_DIR}/memory/scheduler.c
+    ${TEMPER_SRC_DIR}/memory/compression.c
 )
 
 target_include_directories(temper PUBLIC ${TEMPER_INCLUDE_DIR})

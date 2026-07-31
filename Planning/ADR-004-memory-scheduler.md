@@ -1,6 +1,6 @@
 # ADR-004: Memory Scheduler
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-27
 **Deciders:** Soham Anand
 
@@ -411,3 +411,75 @@ void temper_scheduler_tune(TemperMemScheduler *sched) {
     }
 }
 ```
+
+## Amendments (Phase 3 Implementation)
+
+The following amendments supersede the original ADR text where they conflict. They were adopted during Phase 3 to sharpen the policy/mechanism/backend separation.
+
+### Amendment 1: Recomputable is a state, not a tier
+
+The tier enum is **four physical locations** only:
+
+```
+Tier 0: GPU VRAM
+Tier 1: CPU RAM
+Tier 2: Compressed RAM
+Tier 3: SSD
+```
+
+"Recomputable" is not a location — it is a **resource state** (`TEMPER_RESOURCE_RECOMPUTABLE`). A recompute-evicted tensor is `resident == false` with **no storage at all**; it exists only as a graph node. This matters later when tensors exist purely as graph nodes. All resource state lives in a packed `uint32_t flags` (ADR-001):
+
+```
+TEMPER_RESOURCE_RESIDENT      — data is present in memory (host buffer or compressed blob)
+TEMPER_RESOURCE_COMPRESSED    — data stored as backend-owned compressed blob (implies RESIDENT)
+TEMPER_RESOURCE_RECOMPUTABLE  — can be regenerated from origin op
+TEMPER_RESOURCE_PINNED        — scheduler cannot evict
+```
+
+### Amendment 2: Policy / Mechanism / Backend layers
+
+Three clean layers, no leakage:
+
+| Layer | Owns | Example |
+|-------|------|---------|
+| Policy | *decisions* | `temper_placement_score`, `temper_recompute_score`, thresholds |
+| Mechanism | *movement* | eviction, promotion/demotion, pressure accounting, tier budgets |
+| Backend | *bytes* | `TemperCompressionBackend` (bf16 in Phase 3) |
+
+The scheduler never knows *how* a compression backend works. It only knows:
+
+```
+Can I compress this? → compress → pointer + compressed size
+```
+
+Compression metadata (`scale`, zero-point, block tables, dictionaries, checksums) lives inside an opaque `compressed_blob` owned by the backend — `TemperResource` is never extended per-algorithm.
+
+### Amendment 3: Demote direction fix
+
+The original eviction sample called `temper_resource_demote(victim, tier - 1)`. That moves **up** the ladder (GPU → nothing). Demotion targets `tier + 1` (GPU → CPU → COMPRESSED → SSD).
+
+### Amendment 4: Resident vs logical bytes
+
+Each tier tracks **both**:
+
+```c
+used     // resident footprint (compressed_size if compressed, else bytes)
+logical  // uncompressed bytes of everything the graph holds in this tier
+```
+
+Recomputation reduces `used` but not `logical`. The gap (`logical - used`) measures how much of the computation graph exists without resident storage — useful for profiling.
+
+### Amendment 5: Determinism + observability
+
+- The scheduler is **deterministic**: identical resources, access history, and budgets produce identical decisions. LRU ties break on resource `id`. Access-frequency factors use `access_count`, not wall-clock time.
+- `temper_scheduler_validate()` walks every registered resource and asserts accounting/flags/buffers are consistent. Every scheduler unit test ends with it.
+- `temper_scheduler_dump_state()` prints per-tier used/logical/budget/reserved and all statistics.
+- Scheduler state carries `TEMPER_SCHEDULER_VERSION` for future serialization/comparison.
+
+### Amendment 6: Future — Memory Scheduler vs Tensor Lifetime Manager
+
+The scheduler today owns both *where tensors live* (placement/movement) and *whether tensors should exist* (liveness). These are related but distinct problems; a Tensor Lifetime Manager may be split out in a later phase. Not built in Phase 3 — recorded here to keep the boundary in mind.
+
+### Amendment 7: What Phase 3 defers
+
+Per-device schedulers, async scheduling, batch scheduling, decision caching, and telemetry-driven self-tuning are **Phase 12** work. Recompute replay/cascade, gradient checkpointing, SSD paging, and advanced compression backends (int8/int4/fp8) are **Phase 7** work. Phase 3 builds the skeleton — tier model, pressure, eviction, promotion, pinning, statistics — on the CPU/GPU/COMPRESSED tiers only.

@@ -3,6 +3,7 @@ set(TEST_SOURCES
     test_math.c
     test_nn.c
     test_tensor_mobility.c
+    test_memory_scheduler.c
 )
 
 foreach(test_source ${TEST_SOURCES})
