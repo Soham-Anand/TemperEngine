@@ -23,6 +23,9 @@ add_library(temper STATIC
     ${TEMPER_SRC_DIR}/core/platform.c
     ${TEMPER_SRC_DIR}/core/device.c
     ${TEMPER_SRC_DIR}/core/resource.c
+    ${TEMPER_SRC_DIR}/core/runtime.c
+
+    ${TEMPER_SRC_DIR}/compute/kernel.c
 
     ${TEMPER_SRC_DIR}/math/tensor.c
     ${TEMPER_SRC_DIR}/math/shape.c

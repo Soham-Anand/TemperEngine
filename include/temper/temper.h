@@ -10,6 +10,9 @@
 #include "temper/core/logger.h"
 #include "temper/core/profiler.h"
 #include "temper/core/platform.h"
+#include "temper/core/device.h"
+#include "temper/core/runtime.h"
+#include "temper/compute/kernel.h"
 #include "temper/memory/scheduler.h"
 #include "temper/memory/compression.h"
 

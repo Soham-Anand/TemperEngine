@@ -1,6 +1,7 @@
 #include "temper/core/resource.h"
 #include "temper/core/logger.h"
 #include "temper/core/platform.h"
+#include "temper/core/runtime.h"
 #include "temper/memory/scheduler.h"
 #include "temper/utils/assert.h"
 #include <stdlib.h>
@@ -12,6 +13,14 @@ TemperResource *temper_resource_create(TemperDevice device, size_t bytes)
 {
     // Give the scheduler a chance to evict before we allocate.
     temper_scheduler_reserve(device, bytes);
+
+    // Allocation policy lives inside the device's runtime. The core never
+    // knows whether memory came from calloc, mmap, or Metal shared memory.
+    TemperRuntime *allocator = temper_get_runtime(device);
+    if (!allocator)
+    {
+        allocator = temper_cpu_runtime();
+    }
 
     TemperResource *res = (TemperResource *)calloc(1, sizeof(TemperResource));
     TEMPER_ASSERT_MSG(res != NULL, "Failed to allocate TemperResource struct");
@@ -28,10 +37,11 @@ TemperResource *temper_resource_create(TemperDevice device, size_t bytes)
     res->origin = NULL;
     res->compressed_blob = NULL;
     res->compressed_size = 0;
+    res->allocator = allocator;
 
     if (bytes > 0)
     {
-        res->host_ptr = (float *)calloc(1, bytes);
+        res->host_ptr = (float *)allocator->alloc_host(bytes);
         TEMPER_ASSERT_MSG(res->host_ptr != NULL, "Failed to allocate host buffer for TemperResource");
         res->native = res->host_ptr;
         res->flags |= TEMPER_RESOURCE_RESIDENT;
@@ -73,7 +83,7 @@ void temper_resource_release(TemperResource *res)
         }
         if (res->host_ptr)
         {
-            free(res->host_ptr);
+            res->allocator->free_host(res->host_ptr);
             res->host_ptr = NULL;
             res->native = NULL;
         }

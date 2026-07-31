@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 struct TemperGraphNode;
+struct TemperRuntime;
 
 // Physical memory tiers (ADR-004 Amendment 1).
 // "Recomputable" is NOT a tier — it is a resource state flag.
@@ -41,6 +42,7 @@ typedef struct TemperResource
     struct TemperGraphNode *origin; // Graph node that created this resource (recompute source)
     void *compressed_blob;          // Backend-owned compression metadata + data (opaque)
     size_t compressed_size;         // Compressed footprint in bytes
+    struct TemperRuntime *allocator; // Runtime that owns this resource's memory
 } TemperResource;
 
 TemperResource *temper_resource_create(TemperDevice device, size_t bytes);

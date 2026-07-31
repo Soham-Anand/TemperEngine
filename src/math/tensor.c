@@ -117,7 +117,7 @@ TemperTensor temper_tensor_create_on_device(TemperShape shape, TemperDType dtype
     t.refcount = 1;
 
     size_t count = temper_shape_count(&shape);
-    size_t bytes = count * sizeof(float);
+    size_t bytes = count * temper_dtype_size(dtype);
     t.resource = temper_resource_create(device, bytes);
     TEMPER_ASSERT_MSG(t.resource != NULL, "Resource allocation failed for tensor");
 
@@ -136,7 +136,7 @@ TemperTensor temper_tensor_from_data(float *data, TemperShape shape, TemperDType
     float *dst = temper_tensor_data(&t);
     if (dst && data)
     {
-        memcpy(dst, data, count * sizeof(float));
+        memcpy(dst, data, count * temper_dtype_size(dtype));
     }
     return t;
 }
@@ -183,7 +183,7 @@ TemperTensor temper_tensor_to(const TemperTensor *t, TemperDevice target_device)
     float *dst = temper_tensor_data(&new_t);
     if (src && dst)
     {
-        memcpy(dst, src, count * sizeof(float));
+        memcpy(dst, src, count * temper_dtype_size(t->dtype));
     }
     temper_resource_migrate(new_t.resource, target_device);
     return new_t;
