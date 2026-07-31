@@ -177,6 +177,21 @@ TemperTensor temper_tensor_to(const TemperTensor *t, TemperDevice target_device)
         return copy;
     }
 
+    // Zero-copy fast path: on unified memory (Metal shared buffers), a GPU
+    // tensor is already CPU-addressable, so GPU -> CPU is a metadata-only
+    // migrate with no copy. The resource's logical device moves to the CPU
+    // tier so scheduler accounting stays consistent.
+    if (temper_device_is_gpu(t->resource->device) && temper_device_is_cpu(target_device))
+    {
+        TemperTensor copy = *t;
+        temper_resource_retain(copy.resource);
+        if (temper_resource_migrate(copy.resource, target_device) == 0)
+        {
+            return copy;
+        }
+        temper_resource_release(copy.resource); // fall through to copy path
+    }
+
     TemperTensor new_t = temper_tensor_create_on_device(t->shape, t->dtype, target_device);
     size_t count = temper_shape_count(&t->shape);
     float *src = temper_tensor_data(t);

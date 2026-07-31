@@ -1,7 +1,8 @@
 # ADR-002: Device Abstraction
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-27
+**Accepted:** 2026-07-31 (Phase 4 — device table, caps, GPU registration verified on Apple M4)
 **Deciders:** Soham Anand
 
 ## Context
@@ -144,3 +145,18 @@ TemperDevice temper_device_find(TemperDeviceType type, uint32_t min_memory);
 // Get all GPUs
 uint32_t temper_device_get_gpus(TemperDevice *out, uint32_t max_count);
 ```
+
+## Implementation Status
+
+Implemented in `include/temper/core/device.h` / `src/core/device.c`.
+
+- Two-part identity (`TemperDeviceType` + `uint32_t id`) and `TemperDeviceCaps` are
+  implemented as specified, with `TEMPER_DEVICE_CPU_0` / `TEMPER_DEVICE_GPU_0` /
+  `TEMPER_DEVICE_NPU_0` constants.
+- The device table registers the default `CPU:0` at init; the Metal runtime registers
+  `GPU:0` with real capabilities (M4: fp16, bf16, int8 support, memory and compute
+  unit counts from the `MTLDevice`) when it initializes.
+- `temper_device_register` replaces a same-id device entry (idempotent re-init);
+  `temper_device_find`/`temper_device_get_gpus` round out the query surface.
+- GPU capability query (`temper_device_get_caps`) is verified by
+  `tests/test_metal_runtime.c`; device table behavior by `tests/test_runtime.c`.

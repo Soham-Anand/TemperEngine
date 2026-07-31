@@ -1,6 +1,7 @@
 #include "temper/memory/scheduler.h"
-#include "temper/core/logger.h"
-#include "temper/core/platform.h"
+#include "temper/memory/compression.h"
+#include "temper/core/device.h"
+#include "temper/core/runtime.h"
 #include "temper/utils/assert.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,7 +121,14 @@ static void drop_resource(TemperResource *res)
     }
     if (res->host_ptr)
     {
-        free(res->host_ptr);
+        if (res->allocator)
+        {
+            res->allocator->free_host(res->host_ptr);
+        }
+        else
+        {
+            free(res->host_ptr);
+        }
         res->host_ptr = NULL;
         res->native = NULL;
     }
@@ -533,7 +541,14 @@ int temper_resource_demote(TemperResource *res)
             free(blob);
             return -1; // compressed tier full; caller tries another victim
         }
-        free(res->host_ptr);
+        if (res->allocator)
+        {
+            res->allocator->free_host(res->host_ptr);
+        }
+        else
+        {
+            free(res->host_ptr);
+        }
         res->host_ptr = NULL;
         res->native = NULL;
         res->compressed_blob = blob;
@@ -582,6 +597,24 @@ int temper_resource_promote(TemperResource *res)
         {
             return -1;
         }
+        // Route storage back through the resource's allocator so ownership rules
+        // hold regardless of backend (Metal shared buffer vs calloc).
+        float *host = NULL;
+        if (res->allocator)
+        {
+            host = (float *)res->allocator->alloc_host(res->bytes);
+        }
+        else
+        {
+            host = (float *)calloc(1, res->bytes);
+        }
+        if (!host)
+        {
+            free(data);
+            return -1;
+        }
+        memcpy(host, data, res->bytes);
+        free(data);
         size_t old_foot = res->compressed_size;
         move_accounting(res, res->tier, TEMPER_TIER_CPU, old_foot, res->bytes);
         res->tier = TEMPER_TIER_CPU;
@@ -589,8 +622,8 @@ int temper_resource_promote(TemperResource *res)
         free(res->compressed_blob);
         res->compressed_blob = NULL;
         res->compressed_size = 0;
-        res->host_ptr = data;
-        res->native = data;
+        res->host_ptr = host;
+        res->native = host;
         res->flags |= TEMPER_RESOURCE_RESIDENT;
         res->flags &= ~TEMPER_RESOURCE_COMPRESSED;
         g_sched.stats[TEMPER_STAT_DECOMPRESSIONS]++;

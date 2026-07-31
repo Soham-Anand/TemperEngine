@@ -5,6 +5,7 @@ set(TEST_SOURCES
     test_tensor_mobility.c
     test_memory_scheduler.c
     test_runtime.c
+    test_metal_runtime.c
 )
 
 foreach(test_source ${TEST_SOURCES})

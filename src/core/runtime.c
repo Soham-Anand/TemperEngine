@@ -1,5 +1,7 @@
 #include "temper/core/runtime.h"
 #include "temper/core/logger.h"
+#include "temper/core/platform.h"
+#include "temper/metal/metal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -131,6 +133,26 @@ TemperRuntime *temper_cpu_runtime(void)
 {
     temper_runtime_table_init();
     return &g_cpu_runtime;
+}
+
+TemperRuntime *temper_runtime_ensure(TemperDevice device)
+{
+    temper_runtime_table_init();
+    TemperRuntime *rt = temper_get_runtime(device);
+    if (rt)
+    {
+        return rt;
+    }
+    // Lazy backend initialization on first use (PERFORMANCE.md #19): only touch
+    // platform runtimes when a device they can serve is actually requested.
+    if (device.type == TEMPER_DEVICE_GPU && temper_platform_get() == TEMPER_PLATFORM_MACOS)
+    {
+        if (temper_metal_maybe_init() == 0)
+        {
+            return temper_get_runtime(device);
+        }
+    }
+    return NULL;
 }
 
 void temper_runtime_shutdown_all(void)

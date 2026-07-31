@@ -290,10 +290,10 @@ TEST(dispatch_unary_activations)
 
 TEST(dispatch_fails_without_impl_for_device)
 {
-    // Creating a GPU tensor works (allocation falls back to the CPU runtime),
-    // but no GPU kernel implementation exists -> dispatch must fail cleanly.
+    // The NPU has no kernel implementation registered (GPU impls exist in
+    // Phase 4) -> dispatch to it must fail cleanly, never produce garbage.
     TemperTensor a = make_f32(8);
-    TemperTensor g = temper_tensor_create_on_device(a.shape, a.dtype, TEMPER_DEVICE_GPU_0);
+    TemperTensor g = temper_tensor_create_on_device(a.shape, a.dtype, TEMPER_DEVICE_NPU_0);
     ASSERT(g.resource != NULL);
 
     TemperTensor out;

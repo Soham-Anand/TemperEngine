@@ -1,7 +1,8 @@
 # ADR-003: Runtime Interface
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-27
+**Accepted:** 2026-07-31 (Phase 4 — CPU + Metal runtimes live; Metal verified on Apple M4)
 **Deciders:** Soham Anand
 
 ## Context
@@ -328,3 +329,58 @@ int temper_init(void) {
     return 0;
 }
 ```
+
+## Implementation Status
+
+Implemented in `include/temper/core/runtime.h` / `src/core/runtime.c` with one
+deliberate divergence from the ADR sketch: **compute dispatch does not live in the
+runtime**. `TemperRuntime` owns memory policy (`alloc_host`/`free_host`), device
+lifecycle (`init`/`shutdown`), and synchronization — it has no `dispatch` entry point.
+Compute dispatch lives in the kernel registry (`temper/compute/kernel.h`), which
+separates **what** to compute (`TemperKernelType`) from **how** to compute it on a
+device (`TemperKernelImpl`). This split was accepted in the Phase 4 design review.
+
+### Dispatch stack
+
+```
+API op (temper_tensor_add, ...)
+   |
+   v
+placement policy (Phase 4: stay on the tensor's device; no automatic migration yet)
+   |
+   v
+TemperKernelType  "what"        (TEMPER_KERNEL_ADD, TEMPER_KERNEL_MATMUL, ...)
+   |
+   v
+TemperKernelImpl  "how"         (cpu_add, metal_add, metal_matmul_tiled, ...)
+   |                            selected by (type, device_type); replaceable at runtime
+   v
+TemperRuntime                   owns the target device's memory + sync
+   |
+   v
+Device                          CPU_0 / GPU_0 / NPU_0
+```
+
+Telemetry flows back up the same stack: each implementation fills a
+`TemperKernelReport` (time, flops, bytes read/written, occupancy), aggregated into
+per-type `TemperKernelStats`. This is the seed of the measurement-driven scheduler
+loop (telemetry -> placement); Phase 4 only collects, it never decides placement.
+
+### What is implemented
+
+- CPU runtime always registered at `temper_init`; Metal runtime registered lazily by
+  `temper_runtime_ensure(device)` on the first GPU resource creation (avoids the
+  expensive MTLDevice/command-queue init when the GPU is never used).
+- `temper_runtime_shutdown_all` tears down registered runtimes in reverse order at
+  `temper_shutdown`.
+- Memory: resource create/release route through `alloc_host`/`free_host`, so the
+  core sees only allocate -> pointer -> size. Metal allocates shared-memory
+  `MTLBuffer`s (host_ptr -> MTLBuffer registry); an mmap-wrapped zero-copy pool is
+  planned as an allocator swap, not a rewrite.
+- Zero-copy `temper_tensor_to(GPU -> CPU)`: GPU tensors on unified memory are
+  CPU-addressable, so the move is a metadata-only resource migrate
+  (`temper_resource_migrate`), not a copy.
+- Non-Apple builds link `src/metal/metal_stub.c` so `temper_runtime_ensure` stays
+  a no-op and the library is portable.
+- Verified by `tests/test_runtime.c` (13 tests) and `tests/test_metal_runtime.c`
+  (9 tests, macOS/Metal only), green under Debug, Release, and ASan+UBSan.

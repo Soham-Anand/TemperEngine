@@ -38,6 +38,7 @@ uint32_t temper_runtime_count(void);
 TemperRuntime *temper_get_runtime(TemperDevice device);
 TemperRuntime *temper_get_runtime_by_type(TemperDeviceType type);
 TemperRuntime *temper_cpu_runtime(void);
+TemperRuntime *temper_runtime_ensure(TemperDevice device);
 void temper_runtime_shutdown_all(void);
 
 #endif

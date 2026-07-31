@@ -352,25 +352,25 @@ TemperEngine/
 
 ---
 
-### Phase 3 — Memory Scheduler (ADR-004)
+### Phase 3 — Memory Scheduler (ADR-004) ✅ (DONE)
 
 **Goal:** The brain of the engine.
 
 **Design (locked):** Policy / Mechanism / Backend three-layer separation. Tiers are four physical locations (GPU, CPU, Compressed, SSD); recomputable is a **resource state**, not a tier. Compression is a pluggable backend (`can_compress`/`compress`/`decompress`/`estimate_size`); Phase 3 ships bf16. Scheduler is deterministic (access-count factors, LRU tie-break on resource id), observable (`temper_scheduler_dump_state`), and invariant-checked (`temper_scheduler_validate`). See ADR-004/006 amendments.
 
 **Tasks:**
-- [ ] Implement `TemperMemScheduler` struct (opaque handle, `TEMPER_SCHEDULER_VERSION`)
-- [ ] Tiered memory model (GPU, CPU, Compressed, SSD) + recomputable-as-state flags
-- [ ] Placement scoring function (standalone policy, separate from dispatch)
-- [ ] Eviction algorithm (LRU order, pinned-skip, recompute-drop vs demote-to-compressed)
-- [ ] Pressure tracking per tier (`used` resident + `logical` bytes, `reserved` pinned)
-- [ ] Pinned tensor support (`temper_scheduler_pin/unpin`, `temper_tensor_pin/unpin`)
-- [ ] Resource promotion/demotion (decompress-on-access; recompute replay deferred to Phase 7)
-- [ ] Pluggable compression backend (bf16 shipped)
-- [ ] Integration with tensor creation/access (reserve-on-create, promote-on-access)
-- [ ] Scheduler invariants (`temper_scheduler_validate`) and observability (`dump_state`)
-- [ ] Memory scheduler unit tests (all end in `validate()`)
-- [ ] Statistics tracking (evictions, recomputations, compressions, decompressions, promotions, demotions)
+- [x] Implement `TemperMemScheduler` struct (opaque handle, `TEMPER_SCHEDULER_VERSION`)
+- [x] Tiered memory model (GPU, CPU, Compressed, SSD) + recomputable-as-state flags
+- [x] Placement scoring function (standalone policy, separate from dispatch)
+- [x] Eviction algorithm (LRU order, pinned-skip, recompute-drop vs demote-to-compressed)
+- [x] Pressure tracking per tier (`used` resident + `logical` bytes, `reserved` pinned)
+- [x] Pinned tensor support (`temper_scheduler_pin/unpin`, `temper_tensor_pin/unpin`)
+- [x] Resource promotion/demotion (decompress-on-access; recompute replay deferred to Phase 7)
+- [x] Pluggable compression backend (bf16 shipped)
+- [x] Integration with tensor creation/access (reserve-on-create, promote-on-access)
+- [x] Scheduler invariants (`temper_scheduler_validate`) and observability (`dump_state`)
+- [x] Memory scheduler unit tests (all end in `validate()`)
+- [x] Statistics tracking (evictions, recomputations, compressions, decompressions, promotions, demotions)
 
 **Deferred to Phase 7:** recompute replay/cascade, gradient checkpointing, SSD paging, advanced compression (int8/int4/fp8). **Deferred to Phase 12:** per-device schedulers, async/batch scheduling, decision caching, telemetry/self-tuning. **Deferred to Phase 5:** placement-into-dispatch.
 
@@ -378,36 +378,42 @@ TemperEngine/
 
 **Deliverable:** Scheduler manages all tensor memory. Eviction works. Pressure tracking works.
 
+**Status:** Completed. Committed `34febdb`, CI green on macOS/Linux/Windows × Debug/Release.
+
 **Post-Phase 3 (required before Phase 4):** profile and answer — how many evictions occur? how often are tensors compressed? is LRU selecting good victims? what is the scheduler's runtime overhead? how much memory is actually saved? Refine heuristics from measurements, then continue.
+
+**Profiling checkpoint decision (2026-07-31):** explicitly **skipped** by maintainer to keep momentum. Scheduler profiling is deferred and will be driven by the Phase 4 `benchmarks/` pattern (measurement tooling exists; a dedicated scheduler-profiling pass should be added before Phase 5 placement-into-dispatch).
 
 ---
 
-### Phase 4 — Metal Backend (ADR-003) (macOS)
+### Phase 4 — Metal Backend (ADR-003) (macOS) ✅ (DONE)
 
 **Goal:** GPU compute via Metal.
 
+**Design (locked):** Kernel Type ("what") separate from Kernel Implementation ("how") — `TemperKernelImpl` registry with per-(type, device) impls. Allocation policy fully owned by the runtime (`alloc_host`/`free_host`); the core sees only allocate → pointer → size. Custom Metal kernels (no MPS, no Obj-C++) — the custom matmul stays owned by TemperEngine. Benchmarks measure every kernel change (square + transformer shapes). Telemetry is collected but never decides placement in Phase 4 (measurement-driven scheduler arrives in Phase 5/12).
+
 **Tasks:**
-- [ ] Obj-C bridging shim (`metal.h` / `metal.m`)
-- [ ] Metal device + command queue creation
-- [ ] Zero-copy buffer allocation (`mmap` + `newBufferWithBytesNoCopy`)
-- [ ] Compute kernel compilation pipeline (`.metal` → `.metallib`)
-- [ ] Element-wise GPU kernels:
-  - [ ] add (element-wise)
-  - [ ] sub (element-wise)
-  - [ ] mul (element-wise)
-  - [ ] div (element-wise)
-  - [ ] relu
-  - [ ] gelu
-  - [ ] silu
-- [ ] MPS matmul integration (via MPSMatrixMultiplication)
-- [ ] `TemperRuntime` implementation for Metal (ADR-003)
-- [ ] `temper_tensor_to(GPU)` with zero-copy
-- [ ] Metal runtime unit tests
-- [ ] GPU kernel tests
+- [x] Runtime interface (ADR-003): `TemperRuntime` table — CPU always; Metal lazy via `temper_runtime_ensure`
+- [x] Kernel registry: `TemperKernelType` vs `TemperKernelImpl` split, replaceable per (type, device)
+- [x] Obj-C bridging shim (`include/temper/metal/metal.h` / `src/metal/metal.m`)
+- [x] Metal device + command queue creation (lazy on first GPU use)
+- [x] Buffer allocation — v1: shared-memory `MTLBuffer` (storageModeShared) + host_ptr registry
+  - Note: mmap + `newBufferWithBytesNoCopy` is a planned **allocator swap** (same `alloc_host` contract), not a rewrite
+- [x] Compute kernel compilation pipeline (`.metal` → `.air` → `.metallib` → embedded C via `tools/bin2c.c`)
+- [x] Element-wise GPU kernels: add, sub, mul, div, relu, gelu, silu
+- [x] Custom tiled matmul kernel (16×16 threadgroup tiles, shared memory, bounds-guarded)
+  - Note: replaces the "MPS matmul integration" task — maintainer chose custom-over-MPS
+- [x] `TemperRuntime` implementation for Metal (memory + lifecycle; dispatch lives in kernel registry)
+- [x] `temper_tensor_to(GPU)` zero-copy (unified memory) and metadata-only GPU→CPU migrate
+- [x] Metal runtime unit tests (`tests/test_metal_runtime.c`, 9 tests)
+- [x] GPU kernel correctness tests (element-wise + matmul vs CPU reference)
+- [x] Benchmark harness (`benchmarks/bench_kernel.c`)
 
 **Estimated duration:** 3-4 weeks
 
-**Deliverable:** `temper_tensor_to(tensor, GPU)` → GPU compute → `temper_tensor_to(result, CPU)` works end to end.
+**Deliverable:** `temper_tensor_to(tensor, GPU)` → GPU compute → `temper_tensor_to(result, CPU)` works end to end. **Done:** `examples/metal.c` verifies end-to-end; matmul matches the CPU reference exactly.
+
+**Status:** Completed (Apple M4). All tests green under Debug, Release, ASan+UBSan. Benchmark highlights (see PERFORMANCE.md): matmul 4096³ → 309 GFLOPS; 128×768×768×3072 → 199x over CPU reference; element-wise add at 16M elements → 100x CPU, 28.7 GB/s.
 
 ---
 

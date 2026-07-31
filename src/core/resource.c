@@ -16,7 +16,7 @@ TemperResource *temper_resource_create(TemperDevice device, size_t bytes)
 
     // Allocation policy lives inside the device's runtime. The core never
     // knows whether memory came from calloc, mmap, or Metal shared memory.
-    TemperRuntime *allocator = temper_get_runtime(device);
+    TemperRuntime *allocator = temper_runtime_ensure(device);
     if (!allocator)
     {
         allocator = temper_cpu_runtime();

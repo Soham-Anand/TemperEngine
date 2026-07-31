@@ -502,4 +502,56 @@ Show what the optimizer did, how much it saved, how long it took.
 
 ---
 
+## Phase 4 — Metal Backend Results (measured 2026-07-31, Apple M4)
+
+Status of §2/§16/§18/§19 mitigations at the end of Phase 4.
+
+### Implemented so far
+
+- **§19 Lazy initialization:** the Metal runtime is created only on the first GPU
+  resource creation (`temper_runtime_ensure`); the MTLDevice + command queue are
+  never touched in CPU-only workloads.
+- **§2 Device transfer:** GPU tensors are Metal **shared-memory** buffers, so a
+  GPU→CPU `temper_tensor_to` is a metadata-only resource migrate, not a copy.
+  Buffers are allocated through the runtime's `alloc_host` contract, so an
+  mmap + `newBufferWithBytesNoCopy` pool stays a drop-in allocator swap.
+- **§18 Telemetry:** every kernel implementation fills a `TemperKernelReport`
+  (time, flops, bytes read/written, occupancy) aggregated per kernel type
+  (`TemperKernelStats`). Phase 4 collects only; the telemetry→placement loop is
+  Phase 5/12.
+- **§16 Kernel quality:** one custom tiled matmul (16×16 tiles, shared memory)
+  replaces the naive triple loop. Kernel fusion and command batching are still
+  open (P2) — the element-wise path is one-command-buffer-per-op.
+
+### Measured numbers (`benchmarks/bench_kernel`)
+
+| M x K x N | CPU ms | GPU ms | Speedup | GFLOPS | GB/s |
+|-----------|--------|--------|---------|--------|------|
+| 16 x 16 x 16 | 0.01 | 0.17 | 0.04x | 0.05 | 0.02 |
+| 64 x 64 x 64 | 0.33 | 0.18 | 1.84x | 2.88 | 0.27 |
+| 256 x 256 x 256 | 24.38 | 0.66 | 37.17x | 51.15 | 1.20 |
+| 1024 x 1024 x 1024 | 3139.48 | 13.81 | 227.40x | 155.55 | 0.91 |
+| 4096 x 4096 x 4096 | n/a* | 444.68 | — | 309.07 | 0.45 |
+| 128 x 768 x 3072 | 884.22 | 4.44 | 199.15x | 136.03 | 2.57 |
+| 1024 x 4096 x 1024 | n/a* | 27.31 | — | 314.53 | 1.38 |
+| 512 x 64 x 2048 | 151.40 | 1.64 | 92.15x | 81.69 | 2.95 |
+
+Element-wise add: 16M elements → 100.56x vs CPU, 28.7 GB/s.
+
+\* CPU column skipped above an 8 GFLOP budget (naive triple-loop reference).
+
+### Notes / next steps
+
+- Tiled kernel reaches ~310 GFLOPS (~12% of M4 peak fp32). Bigger tiles,
+  SIMD-group accumulators, and a second tiled variant for tall-skinny shapes are
+  the natural Phase-5 matmul work; the benchmark harness makes each change
+  measurable before and after.
+- Small-shape overhead (16³ and the 0.17 ms floor) is dispatch + pipeline fixed
+  cost — §15 (small-op threshold) and §16 (batching) directly target it.
+- Scheduler profiling was explicitly deferred (maintainer decision 2026-07-31);
+  run a scheduler-focused profile pass before Phase 5 wires placement into
+  dispatch.
+
+---
+
 *This document is a living reference. Add new mitigations as they are discovered during implementation and profiling.*
