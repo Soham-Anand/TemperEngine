@@ -410,7 +410,8 @@ TEST(test_shape_3d)
 
 TEST(test_shape_make)
 {
-    TemperShape s = temper_shape_make(3, 2, 4, 8);
+    // Varargs must be promoted to int64_t (Windows LLP64: int is 32-bit)
+    TemperShape s = temper_shape_make(3, (int64_t)2, (int64_t)4, (int64_t)8);
     ASSERT(s.ndim == 3);
     ASSERT(s.dims[0] == 2);
     ASSERT(s.dims[1] == 4);
