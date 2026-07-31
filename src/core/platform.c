@@ -44,7 +44,13 @@ const char *temper_platform_name(TemperPlatform platform)
 uint64_t temper_time_us(void)
 {
 #ifdef __APPLE__
-    return mach_absolute_time() / 1000;
+    static mach_timebase_info_data_t timebase;
+    if (timebase.denom == 0)
+    {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t ticks = mach_absolute_time();
+    return (uint64_t)((double)ticks * timebase.numer / timebase.denom / 1000.0);
 #elif defined(_WIN32)
     LARGE_INTEGER freq, counter;
     QueryPerformanceFrequency(&freq);

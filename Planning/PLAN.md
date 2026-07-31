@@ -336,8 +336,10 @@ TemperEngine/
 - [x] Implement `TemperDeviceTable` for device registration
 - [x] Implement `temper_tensor_to(device)` (creates new resource on target device)
 - [x] Implement `temper_tensor_data()` with scheduler integration
+  - Note: wired to `temper_resource_touch()` for access tracking; full scheduler integration lands in Phase 3.
 - [x] Add resource field to `TemperTensor`
 - [x] Resource tracking table in memory scheduler
+  - Note: per-resource tracking metadata (`id`, `last_access`, `pinned`, `recomputable`, `origin`) is in place on `TemperResource`. The central resource tracking table itself is a Phase 3 deliverable, since the memory scheduler does not exist yet.
 - [x] CPU device as default
 - [x] Migrate existing tensor ops to use TemperResource
 

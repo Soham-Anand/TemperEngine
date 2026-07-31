@@ -300,6 +300,124 @@ TEST(test_tensor_is_contiguous)
     temper_tensor_destroy(&tr);
 }
 
+TEST(test_tensor_div)
+{
+    TemperShape s = temper_shape_1d(3);
+    TemperTensor a = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    TemperTensor b = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *adata = temper_tensor_data(&a);
+    float *bdata = temper_tensor_data(&b);
+    adata[0] = 10.0f; adata[1] = 6.0f; adata[2] = 4.0f;
+    bdata[0] = 2.0f;  bdata[1] = 3.0f; bdata[2] = 5.0f;
+    TemperTensor c = temper_tensor_div(&a, &b);
+    ASSERT_FLOAT(temper_tensor_get(&c, 0), 5.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&c, 1), 2.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&c, 2), 0.8f, 1e-6f);
+    temper_tensor_destroy(&a);
+    temper_tensor_destroy(&b);
+    temper_tensor_destroy(&c);
+}
+
+TEST(test_tensor_reshape)
+{
+    TemperShape sa = temper_shape_2d(2, 6);
+    TemperTensor a = temper_tensor_create(sa, TEMPER_DTYPE_F32);
+    float *adata = temper_tensor_data(&a);
+    for (int i = 0; i < 12; i++)
+    {
+        adata[i] = (float)i;
+    }
+    TemperShape sb = temper_shape_3d(2, 3, 2);
+    TemperTensor b = temper_tensor_reshape(&a, sb);
+    ASSERT(b.shape.ndim == 3);
+    ASSERT(b.shape.dims[0] == 2);
+    ASSERT(b.shape.dims[1] == 3);
+    ASSERT(b.shape.dims[2] == 2);
+    ASSERT_FLOAT(temper_tensor_get(&b, 0), 0.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&b, 5), 5.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&b, 11), 11.0f, 1e-6f);
+    temper_tensor_destroy(&a);
+    temper_tensor_destroy(&b);
+}
+
+TEST(test_tensor_from_data)
+{
+    TemperShape s = temper_shape_2d(2, 2);
+    float raw[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    TemperTensor t = temper_tensor_from_data(raw, s, TEMPER_DTYPE_F32);
+    // Phase 2: from_data copies into a managed resource
+    ASSERT(temper_tensor_data(&t) != NULL);
+    ASSERT(temper_tensor_get(&t, 0) == 1.0f);
+    ASSERT(temper_tensor_get(&t, 3) == 4.0f);
+    // Destroying the tensor must not free the caller's buffer
+    temper_tensor_destroy(&t);
+    ASSERT(raw[0] == 1.0f);
+    ASSERT(raw[3] == 4.0f);
+}
+
+TEST(test_dtype_size)
+{
+    ASSERT(temper_dtype_size(TEMPER_DTYPE_F32) == 4);
+    ASSERT(temper_dtype_size(TEMPER_DTYPE_F16) == 2);
+    ASSERT(temper_dtype_size(TEMPER_DTYPE_BF16) == 2);
+    ASSERT(temper_dtype_size(TEMPER_DTYPE_I8) == 1);
+    ASSERT(temper_dtype_size(TEMPER_DTYPE_U8) == 1);
+}
+
+TEST(test_tensor_get_set_flat)
+{
+    TemperShape s = temper_shape_1d(4);
+    TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    temper_tensor_set(&t, 0, 10.0f);
+    temper_tensor_set(&t, 1, 20.0f);
+    temper_tensor_set(&t, 3, 40.0f);
+    ASSERT_FLOAT(temper_tensor_get(&t, 0), 10.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&t, 1), 20.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&t, 2), 0.0f, 1e-6f);
+    ASSERT_FLOAT(temper_tensor_get(&t, 3), 40.0f, 1e-6f);
+    temper_tensor_destroy(&t);
+}
+
+TEST(test_tensor_zero_size)
+{
+    TemperShape s = temper_shape_2d(0, 5);
+    TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    ASSERT(temper_shape_count(&s) == 0);
+    ASSERT(temper_tensor_bytes(&t) == 0);
+    temper_tensor_destroy(&t);
+}
+
+TEST(test_tensor_index_nd)
+{
+    TemperShape s = temper_shape_3d(2, 3, 4);
+    TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    int64_t idx[] = {1, 2, 3};
+    size_t flat = temper_tensor_index(&t, idx);
+    // 1*12 + 2*4 + 3 = 23
+    ASSERT(flat == 23);
+    temper_tensor_destroy(&t);
+}
+
+TEST(test_shape_3d)
+{
+    TemperShape s = temper_shape_3d(2, 3, 4);
+    ASSERT(s.ndim == 3);
+    ASSERT(s.dims[0] == 2);
+    ASSERT(s.dims[1] == 3);
+    ASSERT(s.dims[2] == 4);
+    ASSERT(temper_shape_count(&s) == 24);
+}
+
+TEST(test_shape_make)
+{
+    TemperShape s = temper_shape_make(3, 2, 4, 8);
+    ASSERT(s.ndim == 3);
+    ASSERT(s.dims[0] == 2);
+    ASSERT(s.dims[1] == 4);
+    ASSERT(s.dims[2] == 8);
+    ASSERT(temper_shape_count(&s) == 64);
+}
+
 int main(void)
 {
     printf("=== Math Tests ===\n");
@@ -321,6 +439,15 @@ int main(void)
     RUN(test_tensor_nd_index);
     RUN(test_tensor_bytes);
     RUN(test_tensor_is_contiguous);
+    RUN(test_tensor_div);
+    RUN(test_tensor_reshape);
+    RUN(test_tensor_from_data);
+    RUN(test_dtype_size);
+    RUN(test_tensor_get_set_flat);
+    RUN(test_tensor_zero_size);
+    RUN(test_tensor_index_nd);
+    RUN(test_shape_3d);
+    RUN(test_shape_make);
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

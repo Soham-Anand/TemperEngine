@@ -298,6 +298,53 @@ TEST(test_arena_alignment)
     temper_arena_destroy(&arena);
 }
 
+TEST(test_arena_allocator_interface)
+{
+    TemperArena arena = temper_arena_create(1024);
+    TemperAllocator a = temper_arena_allocator(&arena);
+    ASSERT(a.alloc != NULL);
+    ASSERT(a.realloc != NULL);
+    ASSERT(a.free != NULL);
+    ASSERT(a.user_data == &arena);
+    void *p1 = a.alloc(100, a.user_data);
+    ASSERT(p1 != NULL);
+    ASSERT(p1 == (void *)arena.buffer);
+    a.free(p1, a.user_data); // no-op
+    temper_arena_destroy(&arena);
+}
+
+TEST(test_arena_capacity_boundary)
+{
+    TemperArena arena = temper_arena_create(64);
+    void *p1 = temper_arena_alloc(&arena, 32);
+    ASSERT(p1 != NULL);
+    void *p2 = temper_arena_alloc(&arena, 32);
+    ASSERT(p2 != NULL);
+    // Should fail: no room left
+    void *p3 = temper_arena_alloc(&arena, 1);
+    ASSERT(p3 == NULL);
+    temper_arena_destroy(&arena);
+}
+
+TEST(test_profiler_print)
+{
+    TemperProfiler prof;
+    temper_profiler_init(&prof);
+    temper_profiler_record_alloc(&prof, 100);
+    temper_profiler_record_alloc(&prof, 50);
+    temper_profiler_print(&prof); // just verify it doesn't crash
+    ASSERT(prof.alloc_count == 2);
+    ASSERT(prof.peak_usage == 150);
+}
+
+TEST(test_sleep_ms)
+{
+    uint64_t t0 = temper_time_us();
+    temper_sleep_ms(10);
+    uint64_t t1 = temper_time_us();
+    ASSERT(t1 - t0 >= 9000); // at least 9ms elapsed
+}
+
 int main(void)
 {
     printf("=== Core Tests ===\n");
@@ -318,6 +365,10 @@ int main(void)
     RUN(test_pool_interleaved);
     RUN(test_arena_stress);
     RUN(test_arena_alignment);
+    RUN(test_arena_allocator_interface);
+    RUN(test_arena_capacity_boundary);
+    RUN(test_profiler_print);
+    RUN(test_sleep_ms);
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;
 }

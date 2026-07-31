@@ -39,6 +39,8 @@ static int test_failed = 0;
         }                                                                     \
     } while (0)
 
+#define ASSERT_FLOAT(a, b, eps) (fabsf((a) - (b)) < (eps))
+
 TEST(test_dense_layer)
 {
     TemperLayer layer = temper_layer_dense(8, 4);
@@ -183,12 +185,106 @@ TEST(test_cosine_scheduler)
     ASSERT(lr50 < 0.01f);
 }
 
+TEST(test_dense_forward)
+{
+    TemperLayer layer = temper_layer_dense(2, 2);
+    // Set weights = identity, bias = 1
+    float *wdata = temper_tensor_data(&layer.weights);
+    wdata[0] = 1.0f; wdata[1] = 0.0f;
+    wdata[2] = 0.0f; wdata[3] = 1.0f;
+    float *bdata = temper_tensor_data(&layer.bias);
+    bdata[0] = 1.0f; bdata[1] = 1.0f;
+
+    TemperShape s = temper_shape_2d(1, 2);
+    TemperTensor input = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *idata = temper_tensor_data(&input);
+    idata[0] = 10.0f; idata[1] = 20.0f;
+
+    TemperTensor out = temper_layer_dense_forward(&layer, &input);
+    float *odata = temper_tensor_data(&out);
+    ASSERT(out.shape.dims[0] == 1);
+    ASSERT(out.shape.dims[1] == 2);
+    ASSERT_FLOAT(odata[0], 11.0f, 1e-5f); // 1*10 + 0*20 + 1
+    ASSERT_FLOAT(odata[1], 21.0f, 1e-5f); // 0*10 + 1*20 + 1
+
+    temper_tensor_destroy(&input);
+    temper_tensor_destroy(&out);
+    temper_layer_destroy(&layer);
+}
+
+TEST(test_silu)
+{
+    TemperShape s = temper_shape_1d(3);
+    TemperTensor t = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *tdata = temper_tensor_data(&t);
+    tdata[0] = 0.0f; tdata[1] = 1.0f; tdata[2] = -1.0f;
+    TemperTensor r = temper_silu(&t);
+    float *rdata = temper_tensor_data(&r);
+    ASSERT_FLOAT(rdata[0], 0.0f, 1e-6f);            // 0 * sigmoid(0) = 0
+    ASSERT_FLOAT(rdata[1], 0.731058f, 1e-5f);       // 1 * sigmoid(1)
+    ASSERT_FLOAT(rdata[2], -0.268941f, 1e-5f);      // -1 * sigmoid(-1)
+    temper_tensor_destroy(&t);
+    temper_tensor_destroy(&r);
+}
+
+TEST(test_sgd_step)
+{
+    TemperOptimizer opt = temper_optimizer_sgd(0.1f);
+    TemperShape s = temper_shape_1d(2);
+    TemperTensor params = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    TemperTensor grads = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *pdata = temper_tensor_data(&params);
+    float *gdata = temper_tensor_data(&grads);
+    pdata[0] = 1.0f; pdata[1] = 2.0f;
+    gdata[0] = 1.0f; gdata[1] = 1.0f;
+    temper_optimizer_step(&opt, &params, &grads);
+    ASSERT_FLOAT(pdata[0], 0.9f, 1e-6f);  // 1.0 - 0.1*1.0
+    ASSERT_FLOAT(pdata[1], 1.9f, 1e-6f);  // 2.0 - 0.1*1.0
+    ASSERT(opt.step == 1);
+    temper_tensor_destroy(&params);
+    temper_tensor_destroy(&grads);
+    temper_optimizer_destroy(&opt);
+}
+
+TEST(test_adam_step)
+{
+    TemperOptimizer opt = temper_optimizer_adam(0.1f, 0.9f, 0.999f, 1e-8f);
+    TemperShape s = temper_shape_1d(1);
+    TemperTensor params = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    TemperTensor grads = temper_tensor_create(s, TEMPER_DTYPE_F32);
+    float *pdata = temper_tensor_data(&params);
+    float *gdata = temper_tensor_data(&grads);
+    pdata[0] = 1.0f;
+    gdata[0] = 0.5f;
+    temper_optimizer_step(&opt, &params, &grads);
+    // Adam update: params -= lr * m_hat / (sqrt(v_hat) + eps)
+    // m = 0.1*0.5 = 0.05, v = 0.001*0.25 = 0.00025
+    // m_hat = 0.05/(1-0.9) = 0.5, v_hat = 0.00025/(1-0.999) = 0.25
+    // params = 1.0 - 0.1 * 0.5 / (0.5 + 1e-8) = 1.0 - 0.1 = 0.9
+    ASSERT_FLOAT(pdata[0], 0.9f, 1e-4f);
+    ASSERT(opt.step == 1);
+    temper_tensor_destroy(&params);
+    temper_tensor_destroy(&grads);
+    temper_optimizer_destroy(&opt);
+}
+
+TEST(test_scheduler_step)
+{
+    TemperScheduler sched = temper_scheduler_cosine(1.0f, 0.0f, 0, 100);
+    TemperOptimizer opt = temper_optimizer_sgd(1.0f);
+    temper_scheduler_step(&sched, &opt, 50);
+    ASSERT(opt.learning_rate < 1.0f);
+    ASSERT(opt.learning_rate > 0.0f);
+    temper_optimizer_destroy(&opt);
+}
+
 TEST(test_checkpoint)
 {
     TemperCheckpoint cp = {.epoch = 5, .step = 100, .loss = 0.5f};
     const char *path = "test_temper.cp";
     int ret = temper_checkpoint_save(path, &cp);
     ASSERT(ret == 0);
+    ASSERT(temper_checkpoint_exists(path));
     TemperCheckpoint loaded = {0};
     ret = temper_checkpoint_load(path, &loaded);
     ASSERT(ret == 0);
@@ -196,6 +292,7 @@ TEST(test_checkpoint)
     ASSERT(loaded.step == 100);
     ASSERT(fabsf(loaded.loss - 0.5f) < 1e-6f);
     remove(path);
+    ASSERT(!temper_checkpoint_exists(path));
 }
 
 int main(void)
@@ -213,6 +310,11 @@ int main(void)
     RUN(test_sgd_optimizer);
     RUN(test_adam_optimizer);
     RUN(test_cosine_scheduler);
+    RUN(test_dense_forward);
+    RUN(test_silu);
+    RUN(test_sgd_step);
+    RUN(test_adam_step);
+    RUN(test_scheduler_step);
     RUN(test_checkpoint);
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return tests_passed == tests_run ? 0 : 1;

@@ -31,6 +31,37 @@ TemperAllocator temper_default_allocator(void)
     return a;
 }
 
+static void *arena_alloc_fn(size_t size, void *ud)
+{
+    TemperArena *arena = (TemperArena *)ud;
+    return temper_arena_alloc(arena, size);
+}
+
+static void *arena_realloc_fn(void *ptr, size_t size, void *ud)
+{
+    (void)ptr;
+    (void)ud;
+    (void)size;
+    return NULL; // Arenas do not support realloc
+}
+
+static void arena_free_fn(void *ptr, void *ud)
+{
+    (void)ptr;
+    (void)ud;
+    // No-op: arena memory is freed as a whole
+}
+
+TemperAllocator temper_arena_allocator(TemperArena *arena)
+{
+    TemperAllocator a = {0};
+    a.alloc = arena_alloc_fn;
+    a.realloc = arena_realloc_fn;
+    a.free = arena_free_fn;
+    a.user_data = arena;
+    return a;
+}
+
 TemperArena temper_arena_create(size_t capacity)
 {
     TemperArena arena = {0};
